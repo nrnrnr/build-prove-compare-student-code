@@ -1,0 +1,32 @@
+-> (check-principal-type revapp
+                         (forall ['a] ((list 'a) (list 'a) -> (list 'a))))
+-> (define revapp (xs ys)
+     (if (null? xs)
+         ys
+         (revapp (cdr xs) (cons (car xs) ys))))
+-> (val empty-list '())
+() : (forall ['a] (list 'a))
+-> (val p (pair (cons 1 empty-list) (cons '(a b c) empty-list)))
+(PAIR (1) ((a b c))) : (pair (list int) (list (list sym)))
+-> (val empty-list '())
+() : (forall ['a] (list 'a))
+-> (val p (pair (cons 1 empty-list) (cons #t empty-list)))
+(PAIR (1) (#t)) : (pair (list int) (list bool))
+-> (val too-polymorphic
+     (lambda (empty-list) (pair (cons 1 empty-list) (cons #t empty-list))))
+type error: cannot make int equal to bool
+-> (val not-too-polymorphic
+      (let ([empty-list '()])
+         (pair (cons 1 empty-list) (cons #t empty-list))))
+(PAIR (1) (#t)) : (pair (list int) (list bool))
+-> (define arg1 (x y) x)
+-> (check-type arg1 (forall ['a 'b] ('a 'b -> 'a)))  ; the principal type
+-> (check-type arg1 (forall ['a]    ('a 'a -> 'a)))  ; a less general type
+-> (val singleton (lambda (x) (cons x '())))
+singleton : (forall ['a] ('a -> (list 'a)))
+-> (val broken (lambda (x) (cons x x)))
+type error: cannot make 'a equal to (list 'a)
+-> (val ss (lambda (y)
+              (let ([single (lambda (x) (cons x '()))])
+                 (single (single y)))))
+ss : (forall ['a] ('a -> (list (list 'a))))

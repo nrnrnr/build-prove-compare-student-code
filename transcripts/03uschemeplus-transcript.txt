@@ -1,0 +1,710 @@
+-> (cons 'a '())
+(a)
+-> (cons 'a '(b))
+(a b)
+-> (cons '(a) '(b))
+((a) b)
+-> (cdr '(a (b (c d))))
+((b (c d)))
+-> (car '(a (b (c d))))
+a
+-> (null? '())
+#t
+-> (null? '(()))
+#f
+-> (define length (xs)
+     (if (null? xs)
+         0
+         (+ 1 (length (cdr xs)))))
+-> (append '(moon over) '(miami vice))
+(moon over miami vice)
+-> (define simple-reverse (xs)
+     (if (null? xs)
+        xs
+        (append (simple-reverse (cdr xs)) (list1 (car xs)))))
+-> (simple-reverse '(my bonny lies over))
+(over lies bonny my)
+-> (simple-reverse '(a b (c d) e))
+(e (c d) b a)
+-> (reverse '(the atlantic ocean))
+(ocean atlantic the)
+-> (define insert (m sorted)
+     (if (null? sorted)
+       (list1 m)
+       (if (< m (car sorted))
+         (cons m sorted)
+         (cons (car sorted) (insert m (cdr sorted))))))
+-> (define insertion-sort (ns)
+     (if (null? ns)
+       '()
+       (insert (car ns) (insertion-sort (cdr ns)))))
+-> (insertion-sort '(4 3 2 6 8 5))
+(2 3 4 5 6 8)
+-> (define seq (m n)
+     (if (> m n) '() (cons m (seq (+ 1 m) n))))
+-> (seq 3 7)
+(3 4 5 6 7)
+-> (define divides? (p n) (= (mod n p) 0))
+-> (define remove-multiples (p ns)
+     (if (null? ns)
+       '()
+       (if (divides? p (car ns))
+         (remove-multiples p (cdr ns))
+         (cons (car ns) (remove-multiples p (cdr ns))))))
+-> (remove-multiples 2 '(2 3 4 5 6 7))
+(3 5 7)
+-> (define primes-in (ns)
+     (if (null? ns)
+       '()
+       (cons (car ns) (primes-in (remove-multiples (car ns) (cdr ns))))))
+-> (define primes<= (n) (primes-in (seq 2 n)))
+-> (primes<= 10)
+(2 3 5 7)
+-> (primes<= 50)
+(2 3 5 7 11 13 17 19 23 29 31 37 41 43 47)
+-> (define has? (sx a)
+     (if (atom? sx)
+         (= sx a)
+         (or (has? (car sx) a) (has? (cdr sx) a))))
+-> (val pangrams    ;; www.rinkworks.com/words/pangrams.shtml, June 2018
+     '((We promptly judged antique ivory buckles for the next prize.)
+       (The quick red fox jumps over a lazy brown dog.)
+       (Amazingly few discotheques provide jukeboxes.)
+       (Heavy boxes perform quick waltzes and jigs.)
+       (Pack my box with five dozen liquor jugs.)))
+-> (has? pangrams 'fox)
+#t
+-> (has? pangrams 'box)
+#t
+-> (has? pangrams 'cox)
+#f
+-> (equal? 'a 'b)
+#f
+-> (equal? '(a (1 3) c) '(a (1 3) c))
+#t
+-> (equal? '(a (1 3) d) '(a (1 3) c))
+#f
+-> (equal? '(a b c) '(a b))
+#f
+-> (equal? #f #f)
+#t
+-> (val emptyset '())
+-> (define member? (x s)       ; (member? x '())         = #f
+     (if (null? s)             ; (member? x (cons x ys)) = #t
+       #f                      ; (member? x (cons y ys)) = (member? x ys),
+       (if (equal? x (car s))  ;                    when x differs from y
+         #t
+         (member? x (cdr s)))))
+-> (define add-element (x s)   ; (add-element x s) = xs, when x is in s
+     (if (member? x s)         ; (add-element x s) = (cons x xs),
+       s                       ;                      when x is not in s
+       (cons x s)))
+-> (val s (add-element 3 (add-element 'a emptyset)))
+(3 a)
+-> (member? 'a s)
+#t
+-> (define size (s)            ; (size '())         = 0
+     (if (null? s)             ; (size (cons x xs)) = (+ 1 (size xs))
+       0
+       (+ 1 (size (cdr s)))))
+-> (define union (s1 s2)       ; (union '() s2)         = s2
+     (if (null? s1)            ; (union (cons x xs) s2) = 
+       s2                      ;           (add-element x (union xs s2))
+       (add-element (car s1) (union (cdr s1) s2))))
+-> (union s (add-element 2 (add-element 3 emptyset)))
+(a 2 3)
+-> (val t (add-element '(a b) (add-element 1 emptyset)))
+((a b) 1)
+-> (member? '(a b) t)
+#t
+-> (val demo-alist (bind 'I 'Ching '()))
+((I Ching))
+-> (val demo-alist (bind 'E 'coli demo-alist))
+((I Ching) (E coli))
+-> (val demo-alist (bind 'I 'Magnin demo-alist))
+((I Magnin) (E coli))
+-> (find 'I demo-alist)
+Magnin
+-> (val aisles (bind 'nog 'dairy '()))
+((nog dairy))
+-> (val aisles (bind 'apple 'produce aisles))
+((nog dairy) (apple produce))
+-> (val aisles (bind 'yam 'produce aisles))
+((nog dairy) (apple produce) (yam produce))
+-> (val aisles (bind 'butter 'dairy aisles))
+((nog dairy) (apple produce) (yam produce) (butter dairy))
+-> (val aisles (bind 'chex 'cereal aisles))
+((nog dairy) (apple produce) (yam produce) (butter dairy) (chex cereal))
+-> (find 'yam aisles)
+produce
+-> (find 'butter aisles)
+dairy
+-> (find 'milk aisles)
+()
+-> (record frozen-dinner [protein starch vegetable dessert])
+-> (make-frozen-dinner 'steak 'potato 'green-beans 'pie)
+(make-frozen-dinner steak potato green-beans pie)
+-> (make-frozen-dinner 'beans 'rice 'tomatillo 'flan)
+(make-frozen-dinner beans rice tomatillo flan)
+-> (frozen-dinner-starch it)
+rice
+-> (frozen-dinner? (make-frozen-dinner 'beans 'rice 'tomatillo 'flan))
+#t
+-> (frozen-dinner? '(beans rice tomatillo flan))
+#f
+-> (record frozen-dinner [protein starch vegetable dessert])
+make-frozen-dinner
+frozen-dinner?
+frozen-dinner-protein
+frozen-dinner-starch
+frozen-dinner-vegetable
+frozen-dinner-dessert
+-> (record nutrition [protein fat carbs])
+make-nutrition
+nutrition?
+nutrition-protein
+nutrition-fat
+nutrition-carbs
+-> (record node [tag left right])
+make-node
+node?
+node-tag
+node-left
+node-right
+-> (val example-sym-tree
+      (make-node 'A
+         (make-node 'B
+             (make-node 'C #f #f)
+             (make-node 'D #f #f))
+         (make-node 'E
+             (make-node 'F
+                (make-node 'G #f #f)
+                (make-node 'H #f #f))
+             (make-node 'I #f #f))))
+-> (define empty-tree? (tree) (= tree #f))
+-> (define preorder (tree)
+     (if (empty-tree? tree)
+         '()
+         (cons (node-tag tree)
+               (append
+                 (preorder (node-left tree))
+                 (preorder (node-right tree))))))
+-> (preorder example-sym-tree)
+(A B C D E F G H I)
+-> (define sqrt (n)
+     (letrec ([find (lambda (r)
+                      (if (> (* r r) n) (- r 1) (find (+ r 1))))])
+       (find 0)))
+-> (define roots (a b c)
+     (let ([minus-b      (negated b)]
+           [discriminant (sqrt (- (* b b) (* 4 (* a c))))]
+           [two-a        (* 2 a)])
+       (list2 (/ (+ minus-b discriminant) two-a)
+              (/ (- minus-b discriminant) two-a))))
+-> (roots 1 3 -70)
+(7 -10)
+-> (val x 'global-x)
+-> (val y 'global-y)
+-> (let
+     ([x 'local-x]
+      [y x])
+     (list2 x y))
+(local-x global-x)
+-> (val x 'global-x)
+-> (val y 'global-y)
+-> (let*
+     ([x 'local-x]
+      [y x])
+     (list2 x y))
+(local-x local-x)
+-> (val emptyqueue '())
+-> (define front         (q) (car q))
+-> (define without-front (q) (cdr q))
+-> (define enqueue (t q)
+     (if (null? q)
+       (list1 t)
+       (cons (car q) (enqueue t (cdr q)))))
+-> (define empty? (q) (null? q))
+-> (define level-order-of-q (queue)
+     (if (empty? queue)
+       '()
+       (let* ([hd   (front         queue)]
+              [tl   (without-front queue)]
+              [newq (if (empty-tree? hd)
+                       tl
+                       (enqueue (node-right hd)
+                                (enqueue (node-left hd) tl)))])
+         (if (node? hd)
+             (cons (node-tag hd) (level-order-of-q newq))
+             (level-order-of-q newq)))))
+-> (define level-order (t)
+     (level-order-of-q (enqueue t emptyqueue)))
+-> (level-order example-sym-tree)
+(A B E C D F I G H)
+-> (define level-order-of-q (queue)
+     (if (empty? queue)
+       '()
+       (let* ([hd    (front         queue)]
+              [queue (without-front queue)]
+              [queue (if (empty-tree? hd)
+                       queue
+                       (enqueue (node-right hd)
+                                (enqueue (node-left hd) queue)))])
+         (if (node? hd)
+             (cons (node-tag hd) (level-order-of-q queue))
+             (level-order-of-q queue)))))
+-> (define level-order (t)
+     (level-order-of-q (enqueue t emptyqueue)))
+-> (level-order example-sym-tree)
+(A B E C D F I G H)
+-> ((lambda (x y) (+ (* x x) (* y y))) 3 4)
+25
+-> ((lambda (x y) (+ (* x x) (* y y))) 707 707)
+999698
+-> ((lambda (x y z) (+ x (+ y z))) 1 2 3)
+6
+-> ((lambda (y) (* y y)) 7)
+49
+-> (define apply-n-times (n f x)
+     (if (= 0 n)
+       x
+       (apply-n-times (- n 1) f (f x))))
+-> (apply-n-times 77 not #t)
+#f
+-> (apply-n-times 78 not #t)
+#t
+-> (define twice  (n) (* 2 n))
+-> (define square (n) (* n n))
+-> (apply-n-times 2 twice 10)
+40
+-> (apply-n-times 2 square 10)
+10000
+-> (apply-n-times 10 twice 1)
+1024
+-> (apply-n-times 10 square 1)
+1
+-> (val add (lambda (x) (lambda (y) (+ x y))))
+-> (val add1 (add 1))
+-> (add1 4)
+5
+-> (val counter-from
+     (lambda (n)
+        (lambda () (set n (+ n 1)))))
+-> (val ten (counter-from 10))
+<function>
+-> (ten)
+11
+-> (ten)
+12
+-> (ten)
+13
+-> (record counter [step reset])
+-> (val resettable-counter-from
+     (lambda (n)                       ; create a counter
+        (make-counter (lambda () (set n (+ n 1)))
+                      (lambda () (set n 0)))))
+-> (val step  (lambda (counter) ((counter-step  counter))))
+-> (val reset (lambda (counter) ((counter-reset counter))))
+-> (val hundred (resettable-counter-from 100))
+-> (val twenty  (resettable-counter-from 20))
+-> (step hundred)
+101
+-> (step hundred)
+102
+-> (step twenty)
+21
+-> (reset hundred)
+0
+-> (step hundred)
+1
+-> (step twenty)
+22
+-> (define mk-rand (next)
+     (let ([seed 1])
+        (lambda () (set seed (next seed)))))
+-> (define simple-next (seed) (mod (+ (* seed 9) 5) 1024))
+-> (val irand (mk-rand simple-next))
+-> (irand)
+14
+-> (irand)
+131
+-> (irand)
+160
+-> (val repeatable-irand (mk-rand simple-next))
+-> (repeatable-irand)
+14
+-> (irand)
+421
+-> (define even? (n) (= 0 (mod n 2)))
+-> (val odd? (o not even?))
+-> (odd? 3)
+#t
+-> (odd? 4)
+#f
+-> (val add (lambda (x) (lambda (y) (+ x y))))
+-> (val curried-list3 (lambda (a) (lambda (b) (lambda (c) (list3 a b c)))))
+-> (curried-list3 'x)
+<function>
+-> ((curried-list3 'x) 'y)
+<function>
+-> (((curried-list3 'x) 'y) 'z)
+(x y z)
+-> (val <-curried (lambda (n) (lambda (m) (< n m))))
+-> (val positive? (<-curried 0))
+-> (positive? 0)
+#f
+-> (positive? 8)
+#t
+-> (positive? -3)
+#f
+-> (val zero? ((curry =) 0))
+-> (zero? 0)
+#t
+-> (val add1 ((curry +) 1))
+-> (add1 4)
+5
+-> (val also+ (uncurry (curry +)))
+-> (also+ 1 4)
+5
+-> (define even? (x) (= (mod x 2) 0))
+-> (filter even? '(1 2 3 4 5 6 7 8 9 10))
+(2 4 6 8 10)
+-> (map add1 '(3 4 5))
+(4 5 6)
+-> (map ((curry +) 5) '(3 4 5))
+(8 9 10)
+-> (map (lambda (x) (* x x)) '(1 2 3 4 5 6 7 8 9 10))
+(1 4 9 16 25 36 49 64 81 100)
+-> (primes<= 20)
+(2 3 5 7 11 13 17 19)
+-> (map ((curry <) 10) (primes<= 20))
+(#f #f #f #f #t #t #t #t)
+-> (exists? even? '(1 2 3 4 5 6 7 8 9 10))
+#t
+-> (all? even? '(1 2 3 4 5 6 7 8 9 10))
+#f
+-> (all? even? (filter even? '(1 2 3 4 5 6 7 8 9 10)))
+#t
+-> (exists? even? (filter (o not even?) '(1 2 3 4 5 6 7 8 9 10)))
+#f
+-> (exists? even? '())
+#f
+-> (all? even? '())
+#t
+-> (foldl - 0 '(1 2 3 4))
+2
+-> (foldr - 0 '(1 2 3 4))
+-2
+-> (define alt-all? (p? xs) (not (exists? (o not p?) xs)))
+-> (alt-all? even? '(1 2 3 4 5 6 7 8 9 10))
+#f
+-> (alt-all? even? '())
+#t
+-> (alt-all? even? (filter even? '(1 2 3 4 5 6 7 8 9 10)))
+#t
+-> (val emptyset '())
+-> (define member?      (x s) (exists? ((curry equal?) x) s))
+-> (define add-element  (x s) (if (member? x s) s (cons x s)))
+-> (define union      (s1 s2) (foldl add-element s1 s2))
+-> (define set-of-list   (xs) (foldl add-element '() xs))
+-> (set-of-list '(a b c x y a))
+(y x c b a)
+-> (union '(1 2 3 4) '(2 4 6 8))
+(8 6 1 2 3 4)
+-> (define sub-alist? (al1 al2)
+      ; all of al1's pairs are found in al2
+      (all? (lambda (pair)
+                (equal? (alist-pair-attribute pair)
+                        (find (alist-pair-key pair) al2)))
+            al1))
+-> (define =alist? (al1 al2)
+      (and (sub-alist? al1 al2) (sub-alist? al2 al1)))
+-> (=alist? '() '())
+#t
+-> (=alist? '((E coli) (I Magnin) (U Thant))
+            '((E coli) (I Ching)  (U Thant)))
+#f
+-> (=alist? '((U Thant) (I Ching) (E coli))
+            '((E coli)  (I Ching) (U Thant)))
+#t
+-> (record set-ops [member? add-element])
+-> (define set-ops-with (my-equal?)
+      (make-set-ops
+         (lambda (x s) (exists? ((curry my-equal?) x) s)) ; member?
+         (lambda (x s) ; add-element
+             (if (exists? ((curry my-equal?) x) s) s (cons x s)))))
+-> (val alist-set-ops (set-ops-with =alist?))
+-> (val al-member?     (set-ops-member?     alist-set-ops))
+-> (val al-add-element (set-ops-add-element alist-set-ops))
+-> (val emptyset '())
+-> (val s (al-add-element '((U Thant) (I Ching) (E coli)) emptyset))
+(((U Thant) (I Ching) (E coli)))
+-> (val s (al-add-element '((Hello Dolly) (Goodnight Irene)) s))
+(((Hello Dolly) (Goodnight Irene)) ((U Thant) (I Ching) (E coli)))
+-> (val s (al-add-element '((E coli) (I Ching) (U Thant)) s))
+(((Hello Dolly) (Goodnight Irene)) ((U Thant) (I Ching) (E coli)))
+-> (al-member? '((Goodnight Irene) (Hello Dolly)) s)
+#t
+-> (define mk-insertion-sort (lt?)
+     (letrec ([insert (lambda (x xs)
+                        (if (null? xs)
+                            (list1 x)
+                            (if (lt? x (car xs))
+                                (cons x xs)
+                                (cons (car xs) (insert x (cdr xs))))))]
+              [sort   (lambda (xs)
+                        (if (null? xs)
+                            '()
+                            (insert (car xs) (sort (cdr xs)))))])
+       sort))
+-> (val sort-increasing (mk-insertion-sort <))
+-> (val sort-decreasing (mk-insertion-sort >))
+-> (sort-increasing '(6 9 1 7 4 3 8 5 2 10))
+(1 2 3 4 5 6 7 8 9 10)
+-> (sort-decreasing '(6 9 1 7 4 3 8 5 2 10))
+(10 9 8 7 6 5 4 3 2 1)
+-> (define find-c (key alist success-cont failure-cont)
+      (letrec
+          ([search (lambda (alist)
+                      (if (null? alist)
+                          (failure-cont)
+                          (if (equal? key (alist-first-key alist))
+                              (success-cont (alist-first-attribute alist))
+                              (search (cdr alist)))))])
+        (search alist)))
+-> (find-c 'Hello '((Hello Dolly) (Goodnight Irene))
+           (lambda (v) (list2 'the-answer-is v))
+           (lambda ()  'the-key-was-not-found))
+(the-answer-is Dolly)
+-> (find-c 'Goodbye '((Hello Dolly) (Goodnight Irene))
+           (lambda (v) (list2 'the-answer-is v))
+           (lambda ()  'the-key-was-not-found))
+the-key-was-not-found
+-> (define find-default (key table default)
+      (find-c key table (lambda (x) x) (lambda () default)))
+-> (define freq (words)
+     (let
+         ([add (lambda (word table)
+                   (bind word (+ 1 (find-default word table 0)) table))]
+          [sort (mk-insertion-sort
+                   (lambda (p1 p2) (> (cadr p1) (cadr p2))))])
+       (sort (foldr add '() words))))
+-> (freq '(it was the best of times , it was the worst of times ! ))
+((it 2) (was 2) (the 2) (of 2) (times 2) (best 1) (, 1) (worst 1) (! 1))
+-> (define followers (words)
+     (letrec
+        ([add  (lambda (word follower table)
+                 (bind word
+                       (add-element follower (find-default word table '()))
+                       table))]
+         [walk (lambda (first rest table)
+                 (if (null? rest)
+                     table
+                     (walk (car rest)
+                           (cdr rest)
+                           (add first (car rest) table))))])
+       (walk (car words) (cdr words) '())))
+-> (followers '(it was the best of times , it was the worst of times ! ))
+((it (was)) (was (the)) (the (worst best)) (best (of)) (of (times)) ...
+-> (define more-than-one? (xs)
+     (if (null? xs) #f (not (null? (cdr xs)))))
+-> (val multi-followers
+      (o
+       ((curry filter) (lambda (p) (more-than-one? (cadr p))))
+       followers))
+-> (multi-followers
+      '(it was the best of times , it was the worst of times ! ))
+((the (worst best)) (times (! ,)))
+-> (multi-followers
+      '(now is the time for all good men to come to the aid of the party))
+((the (party aid time)) (to (the come)))
+-> (define satisfiable? (formula)
+      (find-cnf-true-assignment formula '()
+                                (lambda () #f)
+                                (lambda (cur resume) #t)))
+-> (val sample-formula '((x y z) ((not x) (not y) (not z)) (x y (not z))))
+-> (satisfiable? sample-formula)
+#t
+-> (define one-solution (formula)
+      (find-cnf-true-assignment formula '()
+                                (lambda () 'no-solution)
+                                (lambda (cur resume) cur)))
+-> (one-solution sample-formula)
+((x #t) (y #f))
+-> (define all-solutions (formula)
+      (find-cnf-true-assignment
+           formula
+           '()
+           (lambda () emptyset)
+           (lambda (cur resume) (al-add-element cur (resume)))))
+-> (val answers (all-solutions sample-formula))
+-> (length answers)
+9
+-> (exists?
+      (lambda (cur) (and (= #f (find 'x cur)) (= #f (find 'y cur))))
+      answers)
+#f
+-> (exists?
+      (lambda (cur) (and (= #t (find 'x cur)) (= #t (find 'y cur))))
+      answers)
+#t
+-> (one-solution '((x) ((not x))))
+no-solution
+-> (or 7 'seven)
+7
+-> (if 7 #t 'seven)
+#t
+-> (val n 2)
+-> (or (< 0 (set n (- n 1))) 'finished)
+#t
+-> (val n 2)
+-> (if (< 0 (set n (- n 1))) (< 0 (set n (- n 1))) 'finished)
+#f
+-> (val n 2)
+-> (or (< 0 (set n (- n 1))) 'finished)
+#t
+-> (val n 2)
+-> (let ([x (< 0 (set n (- n 1)))]) (if x x 'finished))
+#t
+-> (val n 0)
+-> (val x 'finished)
+-> (or (< 0 n) x)
+finished
+-> (val n 0)
+-> (val x 'finished)
+-> (let ([x (< 0 n)]) (if x x x))
+#f
+-> (record date (month day))
+-> (define date< (d1 d2)
+     (if (!= (date-month d1) (date-month d2))
+         (< (date-month d1) (date-month d2))
+         (< (date-day d1) (date-day d2))))
+-> (val dates
+     (let ([date-of-pair (lambda (p) (make-date (car p) (cadr p)))])
+       (map date-of-pair '((4 5) (2 9) (3 3) (8 1) (2 7)))))
+-> ((mk-insertion-sort date<) dates)
+((make-date 2 7) (make-date 2 9) (make-date 3 3) (make-date 4 5) (make-date 8 1))
+-> (val u u)
+-> (val resettable-counter-from
+     (lambda (x)                       ; create a counter
+        (list2
+          (list2 'step  (lambda () (set x (+ x 1))))
+          (list2 'reset (lambda () (set x 0))))))
+-> (define member? (x s my-equal?)
+      (exists? ((curry my-equal?) x) s))
+member?
+-> (define add-element (x s my-equal?)
+      (if (member? x s my-equal?) s (cons x s)))
+add-element
+-> (record aset [eq? elements])
+-> (val emptyset (lambda (my-equal?) (make-aset my-equal? '())))
+-> (define member? (x s)
+      (exists? ((curry (aset-eq? s)) x) (aset-elements s)))
+-> (define add-element (x s)
+      (if (member? x s) 
+          s
+          (make-aset (aset-eq? s) (cons x (aset-elements s)))))
+-> (val alist-empty (emptyset =alist?))
+-> (val s (add-element '((U Thant) (I Ching) (E coli)) alist-empty))
+(make-aset <function> (((U Thant) (I Ching) (E coli))))
+-> (val s (add-element '((Hello Dolly) (Goodnight Irene)) s))
+(make-aset <function> (((Hello Dolly) (Goodnight Irene)) ((U Thant)...
+-> (val s (add-element '((E coli) (I Ching) (U Thant)) s))
+(make-aset <function> (((Hello Dolly) (Goodnight Irene)) ((U Thant)...
+-> (member? '((Goodnight Irene) (Hello Dolly)) s)
+#t
+-> (define rainfall-f (ns)
+    (let* ([nonneg? (lambda (n) (>= n 0))]
+           [ms (filter nonneg? (takewhile ((curry !=) 99999) ns))])
+     (/ (foldl + 0 ms) (length ms))))
+-> (rainfall-f '(1 2 3 99999 4 5 6))
+2
+-> (rainfall-f '(1 -1 2 -2 3 -3 6))
+3
+-> (rainfall-f '(-1 -2 -3))
+Run-time error: division by zero
+-> (define rainfall-f (ns)
+    (let* ([nonneg? (lambda (n) (>= n 0))]
+           [ms (filter nonneg? (takewhile ((curry !=) 99999) ns))])
+      (if (null? ms)
+          (error 'rainfall-no-nonnegative-numbers)
+          (/ (foldl + 0 ms) (length ms)))))
+-> (rainfall-f '(1 2 3))
+2
+-> (rainfall-f '(99999 1 2 3))
+Run-time error: rainfall-no-nonnegative-numbers
+-> (define rainfall-p (ns)
+     (let* ([count 0]  ; number of nonnegative numbers seen
+            [total 0]) ; and their sum
+       (while (not (null? ns))
+         (let* ([n (car ns)])
+           (set ns (cdr ns))
+           (when (= n 99999)
+             (break))
+           (when (< n 0)
+             (continue))
+           (set count (+ count 1))
+           (set total (+ total n))))
+       (if (= count 0)
+           (error 'rainfall-no-nonnegative-numbers)
+           (/ total count))))
+-> (rainfall-p '(1 2 3 99999 4 5 6))
+2
+-> (rainfall-p '(1 -1 2 -2 3 -3 6))
+3
+-> (rainfall-p '(-1 -2 -3))
+Run-time error: rainfall-no-nonnegative-numbers
+-> (set error (lambda (msg) (throw :error msg)))
+<function>
+-> (rainfall-p '())
+Run-time error: long-goto :error with no active long-label for :error
+-> (define predicted-rainfall (data)
+     (try-catch
+        (rainfall-p data) ; this is evaluated in the scope of the handler
+        :error            ; this is the exception that the handler catches
+        (lambda (_) 0)    ; this is the handler
+     ))
+-> (predicted-rainfall       '(1 -1 2 -2 0 99999 6 -6))
+1
+-> (predicted-rainfall '(99999 1 -1 2 -2 0 99999 6 -6))
+0
+-> (rainfall-p         '(99999 1 -1 2 -2 0 99999 6 -6))
+Run-time error: long-goto :error with no active long-label for :error
+-> (define find-or-throw (k alist)
+     (while (not (null? alist))
+       (if (equal? k (alist-first-key alist))
+           (return (alist-first-attribute alist))
+           (set alist (cdr alist))))
+     (throw :not-found k))
+-> (find-or-throw 'E '((I Ching) (E coli)))
+coli
+-> (find-or-throw 'X '((I Ching) (E coli)))
+Run-time error: long-goto :not-found with no active long-label for :not-found
+-> (try-catch (find-or-throw 'X '((I Ching) (E coli)))
+              :not-found
+              (lambda (exn) (list2 'not-found exn)))
+(not-found X)
+-> (define alternate-find-or-throw (k alist)
+     (find-c k alist (lambda (v) v) (lambda () (throw :not-found k))))
+-> (alternate-find-or-throw 'E '((I Ching) (E coli)))
+coli
+-> (alternate-find-or-throw 'X '((I Ching) (E coli)))
+Run-time error: long-goto :not-found with no active long-label for :not-found
+-> (try-catch (alternate-find-or-throw 'X '((I Ching) (E coli)))
+              :not-found
+              (lambda (x) (list2 'not-found x)))
+(not-found X)
+-> (define alternate-find-c (k alist success-cont failure-cont)
+     (try-catch (success-cont (find-or-throw k alist))
+                :not-found
+                (lambda (key) (failure-cont))))
+-> (alternate-find-c 'Hello '((Hello Dolly) (Goodnight Irene))
+                     (lambda (v) (list2 'the-answer-is v))
+                     (lambda ()  'the-key-was-not-found))
+(the-answer-is Dolly)
+-> (alternate-find-c 'Goodbye '((Hello Dolly) (Goodnight Irene))
+                     (lambda (v) (list2 'the-answer-is v))
+                     (lambda ()  'the-key-was-not-found))
+the-key-was-not-found
+-> (lambda (x) (when x (break)))
+Lowering error: (break) appeared outside of any loop

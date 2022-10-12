@@ -1,0 +1,151 @@
+-> (use shapes.smt)     ; load shape classes defined in this section
+-> (val c (Circle new))
+<Circle>
+-> (val s (Square new))
+<Square>
+-> (s adjustPoint:to: 'West (c location: 'East))
+<Square>
+-> (val t ((Triangle new) adjustPoint:to: 'Southwest (s location: 'East)))
+<Triangle>
+-> (val pic (Picture empty))
+<Picture>
+-> (pic add: c)
+<Picture>
+-> (pic add: s)
+<Picture>
+-> (pic add: t)
+<Picture>
+-> (val canvas (TikzCanvas new))
+<TikzCanvas>
+-> (pic renderUsing: canvas)
+\begin{tikzpicture}[x=4pt,y=4pt]
+\draw (0,0)ellipse(1 and 1);
+\draw (3,1)--(1,1)--(1,-1)--(3,-1)--cycle;
+\draw (4,2)--(3,0)--(5,0)--cycle;
+\end{tikzpicture}
+<Picture>
+-> ((Shape new) drawOn: canvas) 
+Run-time error: subclass failed to implement a method it was responsible for
+Method-stack traceback:
+  In shapes.smt, line 105, sent `subclassResponsibility` to an object of class Shape
+  In standard input, line 45, sent `drawOn:` to an object of class Shape
+-> (class B [subclass-of Object]
+     (method m1 () (self m2))
+     (method m2 () 'B))
+-> (class C [subclass-of B]
+     (method m2 () 'C))
+-> (val x (C new))
+-> (x m1)
+C
+-> (val ns (List new))
+List( )
+-> (ns addFirst: 3)
+-> (ns addFirst: 2)
+-> (ns addFirst: 1)
+-> ns
+List( 1 2 3 )
+-> (val ms (List new))
+List( )
+-> (ms addLast: 1)
+-> (ms addLast: 2)
+-> (ms addLast: 3)
+-> ms
+List( 1 2 3 )
+-> (ns == ms)
+<False>
+-> (ns = ms)
+<True>
+-> (3 isKindOf: Number)
+<True>
+-> (3 isMemberOf: Number)
+<False>
+-> ('3 isKindOf: Number)
+<False>
+-> (val index 0)
+-> {(set index (index + 1))}
+<Block>
+-> index
+0
+-> ({(set index (index + 1))} value)
+1
+-> index
+1
+-> (val incrementBlock {(set index (index + 1))})
+<Block>
+-> (val sumPlusIndexSquaredBlock {(sum + (index * index))})
+<Block>
+-> (val sum 0)
+0
+-> (set sum (sumPlusIndexSquaredBlock value))
+1
+-> (incrementBlock value)
+2
+-> (set sum (sumPlusIndexSquaredBlock value))
+5
+-> ((sum < 0) ifTrue:ifFalse: {'negative} {'nonnegative})
+nonnegative
+-> ((sum < 0) ifTrue:ifFalse:  'negative   'nonnegative )
+Run-time error: Symbol does not understand message value
+Method-stack traceback:
+  In predefined classes, line 37, sent `value` to an object of class Symbol
+  In standard input, line 154, sent `ifTrue:ifFalse:` to an object of class False
+-> ({(sum < 10000)} whileTrue: {(set sum (5 * sum)) (sum println)})
+25
+125
+625
+3125
+15625
+nil
+-> (val s (Set new))
+Set( )
+-> (s size)
+0
+-> (s add: 2)
+Set( 2 )
+-> (s add: 'abc)
+Set( 2 abc )
+-> (s includes: 2)
+<True>
+-> (s add: 2)
+Set( 2 abc )
+-> (set s (Set withAll: '(1 2 3 1 2 3)))
+Set( 1 2 3 )
+-> (s addAll: '(1 2 3 a b c d e f))
+Set( 1 2 3 a b c d e f )
+-> (s includes: 'b)
+<True>
+-> (s removeAll: '(e f))
+Set( 1 2 3 a b c d )
+-> (val s2 (s reject: [block (x) (x isKindOf: Number)]))
+Set( a b c d )
+-> (val xs (List new))
+List( )
+-> (xs addLast: 'a)
+List( a )
+-> (xs add: 'b)
+List( a b )
+-> (xs addFirst: 'z)
+List( z a b )
+-> (xs first)
+z
+-> (xs addFirst: 'y)
+List( y z a b )
+-> (xs at: 2)
+a
+-> (xs removeFirst)
+y
+-> xs
+List( z a b )
+-> (val two (Fraction num:den: 2 1))
+-> (val epsilon (Fraction num:den: 1 10))
+1/10
+-> (val root2 (two sqrtWithin: epsilon))
+17/12
+-> (val epsilon (1 / 100))
+1/100
+-> (val root2 ((2 asFraction) sqrtWithin: epsilon))
+577/408
+-> (val epsilon ((1 / 100) asFloat))
+1x10^-2
+-> ((2 asFloat) sqrtWithin: epsilon)
+14142x10^-4

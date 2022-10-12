@@ -1,0 +1,111 @@
+-> (val n 3)
+3
+-> (define x-3-plus-1 (k)
+      (+ (* 3 k) 1))            ;; returns 3 * k + 1
+-> (begin                                ;; {
+     (while (> n 1)                      ;;   while (n > 1) 
+        (begin                           ;;     {  
+           (println n)                   ;;       printf("%d\n", n);
+           (if (= (mod n 2) 0)           ;;       if (n % 2 == 0) 
+               (set n (/ n 2))           ;;           n = n / 2;
+               (set n (x-3-plus-1 n))))) ;;       else n = x_3_plus_1(n); }
+     n)                                  ;;   return n; }
+3
+10
+5
+16
+8
+4
+2
+1
+-> 3
+3
+-> n
+1
+-> (set n -13)
+-13
+-> n
+-13
+-> (if (< n 0) (negated n) n)
+13
+-> (while (< n 0) (set n (+ n 10)))
+0
+-> n
+7
+-> (begin (printu 169) (println 2021) -1)
+©2021
+-1
+-> (define add1 (n) (+ n 1))
+add1
+-> (define double (n) (+ n n))
+double
+-> (add1 4)
+5
+-> (double (+ 3 4))
+14
+-> (add1 17 12)
+Run-time error: in (add1 17 12), expected 1 argument but found 2
+-> n                                    ;; the global n
+7
+-> (define addn (n m) (set n (+ n m)))  ;; mutates the parameter
+addn
+-> (addn n 1)                           ;; the parameter is set to 8
+8
+-> n                                    ;; the global n is unchanged
+7
+-> (val x 4)
+-> (println x)
+4
+4
+-> (val y 5)
+5
+-> (begin (println x) (println y) (* x y))
+4
+5
+20
+-> (begin (print x) (print y) (* x y))
+4520
+-> (use gcd.imp)
+0
+gcd
+All 6 tests passed.
+-> (use triangle.imp)
+triangle
+All 4 tests passed.
+-> (use botched-triangle.imp)
+triangle
+Check-expect failed: expected (triangle 1) to evaluate to 1, but it's 0.
+Check-expect failed: expected (triangle 2) to evaluate to 3, but it's 1.
+Check-expect failed: expected (triangle 3) to evaluate to 6, but it's 3.
+Check-expect failed: expected (triangle 4) to evaluate to 10, but it's 6.
+All 4 tests failed.
+-> (use arith-assertions.imp)
+All 3 tests passed.
+-> (val x 2)          
+2
+-> (define x (y) (+ x y))   ; pushing the boundaries of knowledge... 
+-> (define z (x) (x x))     ; and sanity
+-> (z 4)
+6
+-> (if 1 7 undefined)
+7
+-> (define blowstack (n) (+ 1 (blowstack (- n 1))))
+-> (blowstack 0)
+Run-time error: recursion too deep
+-> (define one-bits (n) (if (= n 0) 0 (+ 1 (* 2 (one-bits (- n 1))))))
+-> (one-bits 30)
+1073741823
+-> (one-bits 31)
+2147483647
+-> (one-bits 32)
+Run-time error: Arithmetic overflow
+-> (|| 1 (println 99))
+1
+-> (or 1 (println 99))
+99
+1
+-> (&& 0 (println 33))
+0
+-> (|| 0 (println 33))
+33
+33

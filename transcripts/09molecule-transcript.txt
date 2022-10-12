@@ -1,0 +1,145 @@
+-> (val a (IntArray.new 4 99))
+[99 99 99 99] : IntArray.t
+-> (define int smallest-int ([a : IntArray.t])
+     (let ([smallest (IntArray.at a 0)]
+           [i 1]
+           [n (IntArray.size a)])
+        (while (Int.< i n)
+           (when (Int.< (IntArray.at a i) smallest)
+             (set smallest (IntArray.at a i)))
+           (set i (Int.+ i 1)))
+        smallest))
+smallest-int : (IntArray.t -> Int.t)
+-> a
+[99 99 99 99] : IntArray.t
+-> (smallest-int a)
+99 : Int.t
+-> (IntArray.at-put a 1 55)
+-> (IntArray.at-put a 2 33)
+-> (smallest-int a)
+33 : Int.t
+-> (record-module MyPair t ([n : Int.t] [b : Bool.t]))
+module MyPair :
+  (exports
+    [abstype t]
+    [make : (Int.t Bool.t -> MyPair.t)]
+    [n : (MyPair.t -> Int.t)]
+    [b : (MyPair.t -> Bool.t)]
+    [set-n! : (MyPair.t Int.t -> Unit.t)]
+    [set-b! : (MyPair.t Bool.t -> Unit.t)])
+-> =
+overloaded = : (Char.t Char.t -> Bool.t)
+           = : (Sym.t Sym.t -> Bool.t)
+           = : (Bool.t Bool.t -> Bool.t)
+           = : (Int.t Int.t -> Bool.t)
+-> (= 'yes 'yes)
+#t : Bool.t
+-> (= #f #f)
+#t : Bool.t
+-> (= 3 3)
+#t : Bool.t
+-> (= Char.newline Char.space)
+#f : Bool.t
+-> (+ 1 Char.right-curly)
+type error: function + expects second argument of type Int.t, but got Char.t
+-> (= 125 Char.right-curly)
+type error: function = expects second argument of type Int.t, but got Char.t
+-> (module C Char)
+-> (C.println Char.right-curly)   
+}
+unit : Unit.t
+-> (module C Char)
+module C :
+  (exports
+    [type t Char.t]
+    [new : (Int.t -> Char.t)]
+    ...
+-> (module-type BOOLARRAY (allof ARRAY (exports [type elem Bool.t])))
+-> (module [MyArray : BOOLARRAY] IntArray)
+type error: interface calls for type elem to manifestly equal Bool.t,
+            but it is Int.t
+-> (module-type INTARRAY (allof ARRAY (exports [type elem Int.t])))
+-> (module [MyArray : INTARRAY] IntArray)
+module MyArray :
+  (exports
+    [abstype t]
+    [type elem Int.t]
+    [new : (Int.t Int.t -> MyArray.t)]
+    [empty : ( -> MyArray.t)]
+    [size : (MyArray.t -> Int.t)]
+    [at : (MyArray.t Int.t -> Int.t)]
+    [at-put : (MyArray.t Int.t Int.t -> Unit.t)])
+-> (use pq.mcl)  ; OMIT
+-> (module [IntHeap : ARRAY] (@m ArrayHeap Int))
+type error: interface calls for value new to have type ...
+            but it has type (-> (@m ArrayHeap Int).t)
+-> (module IntHeap (@m ArrayHeap Int))
+module IntHeap :
+  (exports
+    [type t (@m ArrayHeap Int).t]
+    [type elem Int.t]
+    [new : ( -> (@m ArrayHeap Int).t)]
+    [insert : (Int.t (@m ArrayHeap Int).t -> Unit.t)]
+    [empty? : ((@m ArrayHeap Int).t -> Bool.t)]
+    [delete-min : ((@m ArrayHeap Int).t -> Int.t)])
+-> (module BoolHeap (@m ArrayHeap Bool))
+type error: module Bool cannot be used as argument Elem to generic module ...
+-> (module [OrderedBool : (exports [type t Bool.t]
+                                   [<= : (Bool.t Bool.t -> Bool.t)])]
+      (type t Bool.t)
+      (define t <= ([p : t] [q : t])
+         (or (not p) q)))
+-> (module BoolHeap (@m ArrayHeap OrderedBool))
+module BoolHeap :
+  (exports
+    [type t (@m ArrayHeap OrderedBool).t]
+    [type elem Bool.t]
+    ...
+-> (module-type INCONSISTENT
+                (allof (exports [type t Bool.t]) (exports [type t Int.t])))
+module type INCONSISTENT =
+  (allof (exports [type t Bool.t]) (exports [type t Int.t]))
+-> (module [R : (exports [abstype t] [x : t])]
+      (type t Int.t)
+      (val x 1983))
+module R : (exports [abstype t] [x : R.t])
+-> (module [Intlist : (exports [abstype t] [Nil : t] [Cons : (int t -> t)])]
+      (data t
+         [Nil : t]
+         [Cons : (int t -> t)]))
+module Intlist :
+  (exports
+    [abstype t]
+    [Nil : Intlist.t]
+    [Cons : (Int.t Intlist.t -> Intlist.t)])
+-> (data key) (data value) ; OMIT
+-> (data bst [EMPTY : bst] [NODE : (bst key value bst -> bst)])
+bst :: *
+EMPTY : bst
+NODE : (bst key value bst -> bst)
+-> (module-type GENERIC-HASH
+       ([Key : (exports [abstype t]
+                        [hash : (t -> int)]
+                        [= : (t t -> bool)])]
+        [Value : (exports [abstype t])]
+            --m->
+              (exports
+                 [abstype t]
+                                         ;MAKEBLANK
+                 [abstype maybe-value] ; result of lookup
+                 [Not-Found : maybe-value]
+                 [Found     : (Value.t -> maybe-value)]
+                                         ;MAKEBLANK
+                 [new    : ( -> t)]
+                 [insert : (Key.t Value.t t -> unit)]
+                 [delete : (Key.t t -> unit)]
+                 [lookup : (Key.t t -> maybe-value)])))
+module type GENERIC-HASH = ...
+  ...
+-> (val prime-sizes 
+         '(17 23 31 41 59 79 103 137 179 233 307 401 523 683 907 1181 
+           1543 2011 2617 3407 4441 5779 7517 9781 12721 16547 21517 
+           27983 36383 47303 61507 79967 103963 135173 175727 228451
+           296987 386093 501931 652541 848321 1102823 1433681 1863787
+           2422939 3149821 4094791 5323229 6920201 8996303 11695231
+           15203803 19764947 25694447 33402793))

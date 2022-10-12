@@ -1,0 +1,241 @@
+-> (implicit-data traffic-light
+       RED
+       GREEN
+       YELLOW)
+traffic-light :: *
+RED : traffic-light
+GREEN : traffic-light
+YELLOW : traffic-light
+-> (define change-light (light)
+     (case light
+       [GREEN YELLOW]
+       [YELLOW RED]
+       [RED GREEN]))
+;;unboxuml
+-> (change-light GREEN)
+YELLOW : traffic-light
+-> (define light-meaning (light)
+      (case light
+         [RED    'stop]
+         [GREEN  'go]
+         [YELLOW 'go-faster]))
+;;unboxuml
+-> (light-meaning GREEN)
+go : sym
+-> (define safer? (light1 light2)
+      (case light1
+         [GREEN  (case light2
+                    [GREEN  #f]
+                    [YELLOW #t]
+                    [RED    #t])]
+         [YELLOW (case light2
+                    [GREEN  #f]
+                    [YELLOW #f]
+                    [RED    #t])]
+         [RED    #f]))
+safer? : (traffic-light traffic-light -> bool)
+;;unboxuml
+-> (safer? GREEN YELLOW)
+#t : bool
+-> (define safer? (light1 light2)
+      (case (PAIR light1 light2)
+         [(PAIR GREEN  GREEN)  #f]
+         [(PAIR GREEN  YELLOW) #t]
+         [(PAIR GREEN  RED)    #t]
+         [(PAIR YELLOW GREEN)  #f]
+         [(PAIR YELLOW YELLOW) #f]
+         [(PAIR YELLOW RED)    #t]
+         [(PAIR RED    GREEN)  #f]
+         [(PAIR RED    YELLOW) #f]
+         [(PAIR RED    RED)    #f]))
+safer? : (traffic-light traffic-light -> bool)
+-> (safer? GREEN YELLOW)
+#t : bool
+-> (define safer? (light1 light2)
+      (case (PAIR light1 light2)
+         [(PAIR GREEN  GREEN)  #f]
+         [(PAIR GREEN  _)      #t]
+         [(PAIR YELLOW RED)    #t]
+         [(PAIR YELLOW _)      #f]
+         [(PAIR RED    _)      #f]))
+-> (safer? GREEN YELLOW)
+#t : bool
+-> (safer? RED GREEN)
+#f : bool
+-> (safer? YELLOW RED)
+#t : bool
+-> (implicit-data speed
+      [MPH of int]
+      [KPH of int])
+speed :: *
+MPH : (int -> speed)
+KPH : (int -> speed)
+-> (define speed< (speed1 speed2)
+     (case (PAIR speed1 speed2)
+        [(PAIR (MPH n1) (MPH n2))   (< n1 n2)]
+        [(PAIR (KPH n1) (KPH n2))   (< n1 n2)]
+        [(PAIR (MPH n1) (KPH n2))   (< (* 5 n1) (* 8 n2))]
+        [(PAIR (KPH n1) (MPH n2))   (< (* 8 n1) (* 5 n2))]))
+-> (define faster (speed1 speed2)
+     (if (speed< speed1 speed2) speed2 speed1))
+-> (faster (KPH 50) (MPH 30))
+(KPH 50) : speed
+;;unboxuml
+-> (define legal-speed?
+             (my-speed limit)
+     (case limit
+        [(SOME max) (not (speed< max my-speed))]
+        [NONE #t]))
+;;unboxuml
+-> (legal-speed? (MPH 65) (SOME (KPH 110)))
+#t : bool
+-> (legal-speed? (MPH 65) NONE)
+#t : bool
+-> SOME
+<function> : (forall ['a] ('a -> (option 'a)))
+-> NONE
+NONE : (forall ['a] (option 'a))
+-> (define get-opt (maybe default)
+     (case maybe
+        [(SOME a)  a]
+        [NONE      default]))
+get-opt : (forall ['a] ((option 'a) 'a -> 'a))
+;;unboxuml
+-> (data (* => *) bt
+      [BTNODE  : (forall ['a] ('a (bt 'a) (bt 'a) -> (bt 'a)))]
+      [BTEMPTY : (forall ['a] (bt 'a))])
+bt :: (* => *)
+BTNODE : (forall ['a] ('a (bt 'a) (bt 'a) -> (bt 'a)))
+BTEMPTY : (forall ['a] (bt 'a))
+-> (define preorder-elems (t)
+    (case t
+     [BTEMPTY '()]
+     [(BTNODE a left right)
+         (cons a (append (preorder-elems left) (preorder-elems right)))]))
+;;unboxuml
+-> (define single-node (a)
+      (BTNODE a BTEMPTY BTEMPTY))
+;;unboxuml
+-> (val int-bt
+      (BTNODE 1
+         (BTNODE 2
+             BTEMPTY
+             (single-node 3))
+         (BTNODE 4
+             (BTNODE 5
+                  (single-node 6)
+                  (single-node 7))
+             (single-node 8))))
+-> (preorder-elems int-bt)
+(1 2 3 4 5 6 7 8) : (list int)
+-> (define inorder-elems (t)
+      (case t
+         [BTEMPTY '()]
+         [(BTNODE a left right)
+             (append (inorder-elems left) (cons a (inorder-elems right)))]))
+;;unboxuml
+-> (inorder-elems int-bt)
+(2 3 1 6 5 7 4 8) : (list int)
+-> (define bt-map (f t)
+     (case t
+        [BTEMPTY BTEMPTY]
+        [(BTNODE a left right) 
+                         (BTNODE (f a) (bt-map f left) (bt-map f right))]))
+;;unboxuml
+-> (preorder-elems (bt-map (lambda (n) (* n n)) int-bt))
+(1 4 9 16 25 36 49 64) : (list int)
+-> (data * height [HEIGHT : (int -> height)])
+-> (data * weight [WEIGHT : (int -> weight)])
+-> (val h (HEIGHT 196))
+(HEIGHT 196) : height
+-> (val w (WEIGHT 87))
+(WEIGHT 87) : weight
+-> (val starts-with-green
+     (lambda (lights)
+       (case lights
+          [(cons GREEEN _)   #t]
+          [_                 #f])))
+type error: no value constructor named GREEEN
+-> (val starts-with-green
+     (lambda (lights)
+       (case lights
+          [(cons GREEN _)   #t]
+          [_                #f])))
+starts-with-green : ((list traffic-light) -> bool)
+;;unboxuml
+-> (starts-with-green (list3 GREEN YELLOW RED))
+#t : bool
+-> (starts-with-green (list3 YELLOW RED GREEN))
+#f : bool
+-> (define compare-speeds (speed1 speed2)
+      (if (speed< speed1 speed2)
+          LESS
+          (if (speed< speed2 speed1)
+              GREATER
+              EQUAL)))
+;;unboxuml
+-> (define speed-opinion (s) 
+      (if (speed< s (MPH 65))
+          'too-slow
+          (if (speed< (MPH 65) s)
+             'too-fast
+             'just-right)))
+-> (speed-opinion (KPH 110)) ; guide for Canadians in the US
+;;unboxuml
+too-fast : sym
+-> (define speed-opinion-too (s)
+      (case (compare-speeds s (MPH 65))
+         [LESS    'too-slow]
+         [GREATER 'too-fast]
+         [EQUAL   'just-right]))
+;;unboxuml
+-> (speed-opinion-too (KPH 110))
+too-fast : sym
+-> (speed-opinion-too (MPH 65))
+just-right : sym
+-> (data * fish
+      [BLUEGILL : fish]              ; OK, you're a fish
+      [BASS     : (sym -> fish)]     ; OK, you return a fish
+      [PISCES   : sym]               ; No good!  A symbol is not a fish       
+   )
+type error: value constructor PISCES should have type fish, but it has type sym
+-> (data * fish
+      [BLUEGILL : fish]              ; OK, you're a fish
+      [BASS     : (sym -> fish)]     ; OK, you return a fish
+   )
+-> BLUEGILL
+BLUEGILL : fish@{2}
+-> (BASS 'largemouth)
+(BASS largemouth) : fish@{2}
+-> (BASS 'striped)
+(BASS striped) : fish@{2}
+-> (case '(1 2 3 4 5) [(cons x xs) (cons x (reverse xs))])
+(1 5 4 3 2) : (list int)
+-> (case '(1 2 3 4 5) [(cons x1 (cons x2 xs))   (cons x2 (cons x1 xs))])
+(2 1 3 4 5) : (list int)
+-> (define last (xs)
+     (case xs
+        [(cons y '()) y]
+        [(cons _ ys)  (last ys)]))
+-> (last '(1 2 3))
+3 : int
+;;unboxuml
+-> (last '())
+Run-time error: 'case' does not match ()
+-> (data * value
+     [Bool : (bool -> value)]
+     [Int  : (int  -> value)])
+value :: *
+Bool : (bool -> value)
+Int : (int -> value)
+-> (Bool #t)
+(Bool #t) : value
+-> (Int 7)
+(Int 7) : value
+-> (data * exp
+     [Lit  : (value -> exp)]         ;; bool or int
+     [Plus : (exp exp -> exp)]       ;; add two ints to make an int
+     [Less : (exp exp -> exp)]       ;; compare two ints to make a bool
+     [If   : (exp exp exp -> exp)])  ;; look at a bool and choose an 'a
+-> (val ill-typed (Plus (Less (Lit (Int 2)) (Lit (Int 9))) (Lit (Int 1))))
+(Plus (Less (Lit (Int 2)) (Lit (Int 9))) (Lit (Int 1))) : exp

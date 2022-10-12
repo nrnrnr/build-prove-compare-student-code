@@ -1,0 +1,61 @@
+-> (define find-pos-satisfying-upto (p? n fail)
+      (letrec
+         ((try (lambda (i) (if (= i n)
+                               (fail)
+                               (if (p? i) i (try (+ 1 i)))))))
+         (try 1)))
+-> (find-pos-satisfying-upto
+      (lambda (n) (and (= 0 (mod n 5)) (> n 7)))
+      62
+      (lambda () 'not-found))
+10
+-> (define integer-range (lo hi) ;; integers i s.t. lo <= i < hi
+      (if (>= lo hi) '()
+          (cons lo (integer-range (+ 1 lo) hi))))
+-> (define find-in-list (p? xs fail)
+      (if (null? xs)
+          (fail)
+          (if (p? (car xs))
+              (car xs)
+              (find-in-list p? (cdr xs) fail))))
+-> (define symbolic-fail () 'not-found)
+-> (find-in-list
+      (lambda (n) (and (= 0 (mod n 5)) (> n 7)))
+      (integer-range 1 62)
+      symbolic-fail)
+10
+-> (find-in-list
+      (lambda (n) (> n 7))
+      (map ((curry *) 5) (integer-range 0 13))
+      symbolic-fail)
+10
+-> (define square (n) (* n n))
+-> (find-in-list
+      (lambda (n) (> n 137))
+      (filter (lambda (n) (= (mod n 5) 0))
+              (map square (integer-range 0 13)))
+      symbolic-fail)
+not-found
+-> (define square (n) (* n n))
+-> (find-in-list
+      (lambda (n) (> n 137))
+      (filter (lambda (n) (= (mod n 5) 0))
+              (map square (integer-range 0 100)))
+      symbolic-fail)
+225
+-> (define find-pos-satisfying-upto (p? n fail)
+      (letrec
+         ((try (lambda (i) (if (= i n)
+                               (fail)
+                               (if (p? i) i (try (+ 1 i)))))))
+         (try 1)))
+-> (define find-pos-satisfying (p? fail)
+      (letrec
+         ((try (lambda (i) (if (p? i) i (try (+ 1 i))))))
+         (try 1)))
+-> (define is-square? (n) ????)
+-> (define repeat-until (init next pred)
+      (if (pred init) init
+          (repeat-until (next init) next pred)))
+-> (define new-fun-srch-while ()
+       (repeat-until 1 ((curry +) 1) pred))

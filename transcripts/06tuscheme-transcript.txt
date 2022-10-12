@@ -1,0 +1,55 @@
+-> length
+<function> : (forall ['a] ((list 'a) -> int))
+-> cons
+<function> : (forall ['a] ('a (list 'a) -> (list 'a)))
+-> car
+<function> : (forall ['a] ((list 'a) -> 'a))
+-> cdr
+<function> : (forall ['a] ((list 'a) -> (list 'a)))
+-> '()
+() : (forall ['a] (list 'a))
+-> (val length-at-int [@ length int])
+length-at-int : ((list int) -> int)
+-> (val cons-at-bool [@ cons bool])
+cons-at-bool : (bool (list bool) -> (list bool))
+-> pair
+<function> : (forall ['a 'b] ('a 'b -> (pair 'a 'b)))
+-> (val car-at-pair [@ car (pair sym int)])
+car-at-pair : ((list (pair sym int)) -> (pair sym int))
+-> (val cdr-at-sym [@ cdr sym])
+cdr-at-sym : ((list sym) -> (list sym))
+-> (val empty-at-int [@ '() int])
+() : (list int)
+-> (length-at-int '(1 4 9 16 25))
+5 : int
+-> (cons-at-bool #t '(#f #f))
+(#t #f #f) : (list bool)
+-> (car-at-pair ([@ cons (pair sym int)]
+                ([@ pair sym int] 'Office 231) 
+                [@ '() (pair sym int)]))
+(Office . 231) : (pair sym int)
+-> (cdr-at-sym '(a b c d))
+(b c d) : (list sym)
+-> (val useless-length [@ length ((list bool) -> int)])
+useless-length : ((list ((list bool) -> int)) -> int)
+-> (useless-length '(#t #f #f))
+type error: function useless-length of type ...
+-> [@ length bool]
+<function> : ((list bool) -> int)
+-> ([@ length bool] '(#t #f #f))
+3 : int
+-> (val n (+ n 1))
+Name n not found
+-> (val id1 (type-lambda ['a] (lambda ([x : 'a]) x)))
+id1 : (forall ['a] ('a -> 'a))
+-> (val id2 (type-lambda ['b] (lambda ([x : 'b]) x)))
+id2 : (forall ['b] ('b -> 'b))
+-> (use type-tests-id.tus)
+All 3 tests passed.
+-> (val strange
+       (type-lambda ['a] 
+           (type-lambda ['a]
+                (lambda ([x : 'a]) x))))
+strange : (forall ['a] (forall ['a] ('a -> 'a)))
+-> [@ strange int]
+<function> : (forall ['a] ('a -> 'a))

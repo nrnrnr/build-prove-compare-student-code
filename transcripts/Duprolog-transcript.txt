@@ -1,0 +1,349 @@
+?- check_unsatisfiable(natural_number(jacques)).
+?- check_unsatisfiable(null(table)).
+?- check_unsatisfiable(sick(3)).
+?- [fact].  /* makes the interpreter ready to receive facts */
+-> psychiatrist(jacques).
+-> is_in(jacques, marseille).
+-> person(P) :- psychiatrist(P).
+-> sick(Patient) :- psychiatrist(Doctor), analyzes(Doctor, Patient).
+-> [query].  /* makes the interpreter ready to answer queries */
+?- person(jacques).
+yes
+?- is_in(jacques, L).   /* where is Jacques? (as close as Prolog comes) */
+L = marseille
+yes
+?- sick(jacques).
+no
+-> [fact].  /* makes the interpreter ready to receive facts */
+-> different(yellow, blue).
+-> different(blue, yellow).
+-> different(yellow, red).
+-> different(red, yellow).
+-> different(blue, red).
+-> different(red, blue).
+-> britmap_coloring(Atl, En, Ie, NI, Sc, Wa) :-
+     different(Atl, En), different(Atl, Ie), different(Atl, NI), 
+     different(Atl, Sc), different(Atl, Wa),
+     different(En, Sc), different(En, Wa),
+     different(Ie, NI).
+-> fragment_coloring(Be, De, Fr, Lu) :-
+     different(Be, De), different(Be, Fr), different(Be, Lu), 
+     different(De, Fr), different(De, Lu), 
+     different(Fr, Lu).
+-> [query].  /* makes the interpreter ready to answer queries */
+?- britmap_coloring(yellow, blue, red, yellow, blue, red).
+no
+?- britmap_coloring(Atl, En, Ie, NI, Sc, Wa).
+Atl = yellow
+En = blue
+Ie = blue
+NI = red
+Sc = red
+Wa = red
+yes
+?- fragment_coloring(Be, De, Fr, Lu).
+no
+?- [fact].
+-> married(X) :- married(X, Y).
+-> married(Y) :- married(X, Y).
+?- [rule].
+-> member(X, [X|XS]).
+-> member(X, [Y|YS]) :- member(X, YS).
+-> [query].
+?- member(3, [2, 3]).
+yes
+?- member(3, [2, 4]).
+no
+?- member(X, [1, 2, 3, 4]).
+X = 1
+yes
+?- member(X, [1, 2, 3, 4]), X > 2.
+X = 3
+yes
+?- member(X, [1, 2, 3, 4]), X > 20.
+no
+?- check_satisfied(member(X, [2, 3]), X = 2).
+?- check_satisfied(member(X, [2, 3]), X = 3).
+?- check_unsatisfiable(member(X, [2, 3]), X < 2).
+?- check_unsatisfiable(member(X, [2, 3]), X > 3).
+?- check_satisfied(person(jacques)).
+?- check_unsatisfiable(sick(jacques)).
+?- check_unsatisfiable(sick(3)).
+-> [query].
+?- member(X, [4, 3]).
+X = 4
+yes
+?- member(3, XS), member(4, XS).
+XS = [3, 4|_XS354]
+yes
+-> [query].
+?- britmap_coloring(Atl, En, Ie, NI, Sc, Wa).
+Atl = yellow
+En = blue
+Ie = blue
+NI = red
+Sc = red
+Wa = red
+yes
+?- member(XS, [1|nil]).
+XS = 1
+yes
+-> [rule].
+-> imokay :- youreokay, hesokay.    /* clause 1 */
+-> youreokay :- theyreokay.         /* clause 2 */
+-> hesokay.                         /* clause 3 */
+-> theyreokay.                      /* clause 4 */
+-> [query].
+?- imokay.
+yes
+?- [rule].
+-> hesnotokay :- imnotokay.  /* clause 5 */
+-> shesokay :- hesnotokay.   /* clause 6 */
+-> shesokay :- theyreokay.   /* clause 7 */
+-> [query].
+?- shesokay.
+yes
+?- [rule].
+-> hesnotokay :- shesokay.   /* clause 8 */
+-> hesnotokay :- imokay.     /* clause 9 */
+-> [query].
+?- member(X, [1, 2, 3, 4]), X > 2.
+X = 3
+yes
+-> [query].
+?- 12 is 10 + 2.
+yes
+?- X is 2 - 5.
+X = -3
+yes
+?- X is 10 * 10, Y is (X + 1) / 2.
+X = 100
+Y = 50
+yes
+?- [rule].
+-> snocced([], X, [X]).
+-> snocced([Y|YS], X, [Y|ZS]) :- snocced(YS, X, ZS).
+-> [query].
+?- snocced([3], 4, [3,4]).
+yes
+?- snocced([3], 4, YS).
+YS = [3, 4]
+yes
+-> snocced(XS, 4, [3, 4]).
+XS = [3]
+yes
+?- [rule].
+-> reversed([], []).
+-> reversed([X|XS], YS) :- reversed(XS, ZS), snocced(ZS, X, YS).
+-> [query].
+?- reversed([1, 2], XS).
+XS = [2, 1]
+yes
+?- reversed(XS, [1, 2]).
+XS = [2, 1]
+yes
+?- [rule].
+-> appended([], YS, YS).
+-> appended([X|XS], YS, [X|ZS]) :- appended(XS, YS, ZS).
+-> [query].
+?- appended([3, 4], [5], [3, 4, 5]).
+yes
+?- appended([3, 4], [5, 6], ZS).
+ZS = [3, 4, 5, 6]
+yes
+?- appended(XS, YS, [5, 6, 7]).
+XS = []
+YS = [5, 6, 7]
+yes
+?- [rule].
+-> nonempty([X|XS]).
+-> [query].
+?- appended(XS, YS, [5, 6, 7]), nonempty(XS), nonempty(YS).
+XS = [5]
+YS = [6, 7]
+yes
+?- appended(XS, YS, [99]), nonempty(XS), nonempty(YS).
+no
+?- [rule].
+-> member_variant(X, XS) :- appended(YS, [X|ZS], XS).
+-> found(K, A, L) :- member(pair(K, A), L).
+-> capitals([pair(chile, santiago), pair(peru, lima), pair(brazil, brasilia)]).
+-> [query].
+?- capitals(CS), found(peru, CapitalOfPeru, CS).
+CS = [pair(chile, santiago), pair(peru, lima), pair(brazil, brasilia)]
+CapitalOfPeru = lima
+yes
+?- [rule].
+-> power(X, 0, 1).
+-> power(X, N, Z) :- N > 0, N1 is N - 1, power(X, N1, Z1), Z is Z1 * X.
+-> [query].
+?- power(3, 5, Z).
+Z = 243
+yes
+?- power(5, 3, Z).
+Z = 125
+yes
+?- power(3, N, 27).
+Run-time error: Used comparison > on non-integer term
+?- [rule].
+-> fac(0, 1).
+-> fac(N, R) :- N1 is N - 1, fac(N1, R1), R is N * R1.
+?- [rule].
+-> sorted(XS, YS) :- permutation(XS, YS), ordered(YS).
+-> ordered([]).
+-> ordered([N]).
+-> ordered([N, M|NS]) :- N =< M, ordered([M|NS]).
+-> permutation([], []).
+-> permutation(XS, [Y|YS]) :- 
+       appended(WS, [Y|US], XS), appended(WS, US, ZS), permutation(ZS, YS).
+-> [query].
+?- sorted([4, 2, 3], NS).
+NS = [2, 3, 4]
+yes
+?- [rule].
+-> partitioned(Pivot, [A|XS], [A|YS], ZS) :- A =< Pivot, partitioned(Pivot, XS, YS, ZS).
+-> partitioned(Pivot, [A|XS], YS, [A|ZS]) :- Pivot < A,  partitioned(Pivot, XS, YS, ZS).
+-> partitioned(Pivot, [], [], []).
+-> quicksorted([], []).
+-> quicksorted([X|XS], Sorted) :- 
+      partitioned(X, XS, Lows, Highs), 
+      quicksorted(Lows, Lows1), quicksorted(Highs, Highs1),
+      appended(Lows1, [X|Highs1], Sorted).
+-> [query].
+?- quicksorted([8, 2, 3, 7, 1], S).
+S = [1, 2, 3, 7, 8]
+yes
+?- [rule].
+-> canonical(diff(ZS, ZS), []).
+-> canonical(diff([X|YS], ZS), [X|XS]) :- canonical(diff(YS, ZS), XS).
+-> [query].
+?- canonical(diff([3, 4|YS], YS), XS).
+YS = _ZS6748
+XS = [3, 4]
+yes
+?- canonical(D, [3, 4]).
+D = diff([3, 4|_ZS6990], _ZS6990)
+yes
+?- [rule].
+-> diffappended(diff(XS, YS), diff(YS, ZS), diff(XS, ZS)).
+-> [query].
+?- diffappended(diff([1, 2|YS], YS), diff([3, 4|ZS], ZS), D).
+YS = [3, 4|_ZS7075]
+ZS = _ZS7075
+D = diff([1, 2, 3, 4|_ZS7075], _ZS7075)
+yes
+?- [rule].
+-> triple([on(Block, Thing) | S], move(Block, Dest), [on(Block, Dest) | S]).
+-> triple([on(B1, T1) | Pre], move(Block, Dest), [on(B1, T1) | Post]) :-
+      different(Block, B1), triple(Pre, move(Block, Dest), Post).
+-> different(a, b).  different(b, a).
+-> different(a, c).  different(c, a).
+-> different(b, c).  different(c, b).
+-> block(a). block(b). block(c).  /* these things are blocks */
+-> legal_move(move(Block, table), S) :- block(Block), holds_nothing(Block, S).
+-> legal_move(move(B1, B2), S) :-
+      block(B1), different(B1, B2), holds_nothing(B1, S), holds_nothing(B2, S).
+-> holds_nothing(Block1, [on(Block2, Thing) | S]) :-
+      different(Block1, Thing), holds_nothing(Block1, S).
+-> holds_nothing(Block1, []).
+-> different(Block, table) :- block(Block).
+-> different(table, Block) :- block(Block).
+-> changes_state(move(Block, Dest), [on(Block, Thing) | S]) :- different(Dest, Thing).
+-> changes_state(move(Block, Dest), [on(B1, T1) | S]) :-
+      different(Block, B1), changes_state(move(Block, Dest), S).
+-> good_move(M, S) :- legal_move(M, S), changes_state(M, S).
+-> transforms(State, [], State, Visited).
+-> transforms(Initial, [Move|Moves], Final, Visited) :- 
+     good_move(Move, Initial), 
+     triple(Initial, Move, Intermediate), 
+     not_member(Intermediate, Visited), 
+     transforms(Intermediate, Moves, Final, [Intermediate|Visited]).
+-> transforms(Initial, Moves, Final) :- transforms(Initial, Moves, Final, []).
+-> not_member(X, []).
+-> not_member(X, [Y|YS]) :- different(X, Y), not_member(X, YS).
+-> different([on(A, X)|State1], [on(A, Y)|State2]) :- different(X, Y).
+-> different([on(A, X)|State1], [on(A, X)|State2]) :- different(State1, State2).
+-> initial([on(a, b), on(b, table), on(c, a)]).
+-> desired([on(a, b), on(b, c), on(c, table)]).
+-> [query].
+?- initial(S1), desired(S2), transforms(S1, Moves, S2).
+S1 = [on(a, b), on(b, table), on(c, a)]
+S2 = [on(a, b), on(b, c), on(c, table)]
+Moves = [move(c, table), move(a, table), move(b, a), move(b, c), move(a, b)]
+yes
+?- [rule].
+-> transforms2(State, [], State, Visited).
+-> transforms2(Initial, [Move|Moves], Final, Visited) :- 
+     better_move(Move, Initial, Final),
+     triple(Initial, Move, Intermediate), 
+     not_member(Intermediate, Visited), 
+     transforms2(Intermediate, Moves, Final, [Intermediate|Visited]).
+-> transforms2(Initial, Moves, Final) :- transforms2(Initial, Moves, Final, []).
+-> better_move(Move, Initial, Final) :- suggest(Move, Final), 
+                                        good_move(Move, Initial).
+-> better_move(Move, Initial, Final) :- good_move(Move, Initial).
+-> suggest(move(Block, Dest), State) :- member(on(Block, Dest), State).
+-> [query].
+?- initial(S1), desired(S2), transforms2(S1, Moves, S2).
+S1 = [on(a, b), on(b, table), on(c, a)]
+S2 = [on(a, b), on(b, c), on(c, table)]
+Moves = [move(c, table), move(a, table), move(b, c), move(a, b)]
+yes
+?- [rule]. 
+-> implemented_by(eq, int, inteq).
+-> implemented_by(lt, int, intlt).
+-> implemented_by(eq,
+                  bool,
+                  lambda([arg(p,bool),arg(q,bool)],if(p,p,apply(not,[q])))).
+-> implemented_by(lt, bool, lambda([arg(p,bool),arg(q,bool)],if(p,false,q))).
+-> implemented_by(eq, pairtype(T1, T2),
+                  lambda([arg(p1, pairtype(T1,T2)),
+                          arg(p2, pairtype(T1,T2))],
+                         if(apply(EQ1,[apply(fst,[p1]),apply(fst,[p2])]),
+                            apply(EQ2,[apply(snd,[p1]),apply(snd,[p2])]),
+                            false))) :-
+      implemented_by(eq, T1, EQ1),
+      implemented_by(eq, T2, EQ2).
+-> [query].
+?- implemented_by(eq, pairtype(int, bool), EQIB).
+EQIB = lambda([arg(p1, pairtype(int, bool)), ...
+yes
+?- [rule].
+-> implemented_by(lt, pairtype(T1, T2),
+                  lambda([arg(p1, pairtype(T1,T2)),
+                          arg(p2, pairtype(T1,T2))],
+                         if(apply(EQ1,[apply(fst,[p1]),apply(fst,[p2])]),
+                            apply(LT2,[apply(snd,[p1]),apply(snd,[p2])]),
+                            apply(LT1,[apply(fst,[p1]),apply(fst,[p2])])))) :-
+      implemented_by(eq, T1, EQ1),
+      implemented_by(lt, T1, LT1),
+      implemented_by(lt, T2, LT2).
+-> [query].
+?- implemented_by(lt, pairtype(int, int), LTII).
+LTII = lambda([arg(p1, pairtype(int, int)), ...
+yes
+?- [rule].
+-> implemented_by(eq, listtype(T),
+     letrec(eqlists,
+        lambda([arg(xs, listtype(T)), arg(ys, listtype(T))],
+               if(apply(isnull,[xs]),
+                  apply(isnull,[ys]),
+                  if(apply(isnull,[ys]),
+                     false,
+                     if(apply(EQT,    [apply(car,[xs]),apply(car,[ys])]),
+                        apply(eqlists,[apply(cdr,[xs]),apply(cdr,[ys])]),
+                        false)))),
+        eqlists)) :-
+    implemented_by(eq, T, EQT).
+-> admits_equality(T) :- implemented_by(eq, T, F).
+-> [query].
+?- admits_equality(int).
+yes
+?- admits_equality(listtype(pairtype(int, listtype(int)))).
+yes
+?- admits_equality(arrowtype([int, int], bool)).
+no
+?- [rule].
+-> not_equal(X,Y) :- equal(X,Y), !, fail.
+-> not_equal(X,Y).
+-> equal(X,X).

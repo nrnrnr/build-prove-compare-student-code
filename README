@@ -1,5 +1,5 @@
 This directory contains source code for students to use with the
-book *Programming Languages: Build, Prove, and Compire*.
+book *Programming Languages: Build, Prove, and Compare*.
 This distribution does *not* include solutions to many exercises
 (garbage collection, type checking, unification, etc), so the
 interpreters are incomplete.  Binary code for complete interpreters

@@ -41,8 +41,14 @@ each of these directories contains one subdirectory per interpreter.
   uschemeplus   uScheme+ implemented in C (Chapter 3)
   usmalltalk    uSmalltalk (Chapter 10)
 
-Each interpreter comes with a Makefile that does something, although
-in some cases the Makefile may be specialized to the environment at
+Each interpreter comes with a Makefile that does something.
+Regrettably, there is no Makefile that works with all gcc versions,
+but the distributed Makefiles should work with gcc 10 and 11.
+If you have gcc 12 or later, or if your C compiler balks for
+any reason, you can change the flags passed to the C compiler
+by editing the `config.mk` file in this directory.
+
+In some cases the Makefile may be specialized to the environment at
 Tufts and so may be less than useful to you.  At Tufts we compile the
 interpreters using gcc, Moscow ML, and mlton.  For uscheme-copy and
 uscheme-ms, you may want to compile with the option -DNOVALGRIND, or

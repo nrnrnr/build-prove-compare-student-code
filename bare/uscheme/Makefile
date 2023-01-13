@@ -12,8 +12,10 @@ HEADERS  = all.h prim.h
 OBJECTS  = $(SOURCES:.c=.o)
 RESULT   = uscheme
 
+include ../../config.mk
+
 CC = gcc -std=c11 -pedantic -Wall -Werror -Wextra -Wno-overlength-strings
-CFLAGS = -g 
+CFLAGS = -g $(XCFLAGS)
 LDFLAGS = -g
 CPPFLAGS = -I.
 RM = rm -f 

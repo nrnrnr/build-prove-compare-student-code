@@ -1415,8 +1415,10 @@ val _ = op valueString : value -> string
 fun expString e =
   let fun bracket s = "(" ^ s ^ ")"
       val bracketSpace = bracket o spaceSep
+      fun sqbracket s = "[" ^ s ^ "]"
+      val sqSpace = sqbracket o spaceSep
       fun exps es = map expString es
-      fun formal (x, tau) = bracketSpace [typeString tau, x]
+      fun formal (x, tau) = sqSpace [x, ":", typeString tau]
       fun withBindings (keyword, bs, e) =
         bracket (spaceSep [keyword, bindings bs, expString e])
       and bindings bs = bracket (spaceSep (map binding bs))
@@ -2484,15 +2486,17 @@ val primBasis =
                                     , FORALL (["'a"], FUNTY ([tvA, listtype tvA]
                                                             , listtype tvA))) ::
                              ("car",  unaryOp  (fn (PAIR (car, _)) => car 
-                                                 | v => raise RuntimeError
-                                                           (
-                                    "car applied to non-list " ^ valueString v))
+                                                 | NIL => raise RuntimeError
+                                                     "car applied to empty list"
+                                                 | v => raise BugInTypeChecking
+                                                      "car applied to non-list")
                                    ,  FORALL (["'a"], FUNTY ([listtype tvA], tvA
                                                                           ))) ::
                              ("cdr",  unaryOp  (fn (PAIR (_, cdr)) => cdr 
-                                                 | v => raise RuntimeError
-                                                           (
-                                    "cdr applied to non-list " ^ valueString v))
+                                                 | NIL => raise RuntimeError
+                                                     "cdr applied to empty list"
+                                                 | v => raise BugInTypeChecking
+                                                      "cdr applied to non-list")
                                    ,  FORALL (["'a"], FUNTY ([listtype tvA],
                                                               listtype tvA))) ::
 

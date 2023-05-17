@@ -868,13 +868,13 @@ val _ = op >>= : 'a error * ('a -> 'b error) -> 'b error
 (* A very common special case occurs when the   *)
 (* continuation always succeeds; that is, the   *)
 (* continuation [[k']] has type \monobox'a -> 'b instead *)
-(* of \monobox'a -> b error. In this case, the execution *)
-(* plan is that when [[(f x)]] succeeds, continue by *)
-(* applying [[k']] to the result; otherwise propagate *)
-(* the error. I know of no standard way to write this *)
-(* operator, [Haskell uses [[flip fmap]].] , so I use  *)
-(* [[>>=+]], which you might also choose to pronounce *)
-(* ``and then.''                                *)
+(* of \monobox'a -> 'b error. In this case, the *)
+(* execution plan is that when [[(f x)]] succeeds, *)
+(* continue by applying [[k']] to the result; otherwise *)
+(* propagate the error. I know of no standard way to *)
+(* write this operator, [Haskell uses [[flip fmap]].] , *)
+(* so I use [[>>=+]], which you might also choose to *)
+(* pronounce ``and then.''                      *)
 
 (* <support for representing errors as \ml\ values>= *)
 infix 1 >>=+
@@ -6401,6 +6401,126 @@ val predefinedTypeBasis =
                              ,
                        ";  in uML can also be defined using [[implicit-data]]: "
                              , ""
+                             ,
+                            ";  m0.30\\linewidth-8.6pt @\\mskip                "
+                             ,
+                           ";  3mu \\definedas\\mskip20mu m0.30\\              "
+                             ,
+                              ";  linewidth-8.6pt@                             "
+                             ,
+                              ";                                               "
+                             ,
+                             ";   (implicit-data \\stycon                      "
+                             ,
+                              ";  K_1                                          "
+                             ,
+                              ";  ...                                          "
+                             ,
+                             ";  [K_i of \\cdotsnt]                            "
+                             ,
+                              ";  ...                                          "
+                             ,
+                       ";                                     (data * \\stycon "
+                             ,
+                       ";                                     [K_1 : \\stycon] "
+                             ,
+                              ";                                     ...       "
+                             ,
+                    ";  )                                     [K_i : (\\cdotsn "
+                             ,
+                        ";                                     t -> \\stycon)] "
+                             ,
+                              ";                                     ...       "
+                             ,
+                              ";                                     )         "
+                             ,
+                              ";                                               "
+                             ,
+                              ";            (a) Without type parameters        "
+                             ,
+                       ";                                     (data (\\cdotsm* "
+                             ,
+                        ";                                     => * ) \\stycon "
+                             ,
+                         ";                                     [K_1 : (forall "
+                             ,
+                       ";   (implicit-data (\\cdotsmalpha)     (\\cdotsmalpha) "
+                             ,
+                      ";   \\stycon                           (T \\cdotsmalpha "
+                             ,
+                              ";   K_1                               ))]       "
+                             ,
+                              ";   ...                               ...       "
+                             ,
+                        ";   [K_i of \\cdotsnt]                 [K_i : (forall "
+                             ,
+                        ";                                     (\\cdotsmalpha) "
+                             ,
+                          ";   ...                               (\\cdotsnt -> "
+                             ,
+                       ";   )                                 (T \\cdotsmalpha "
+                             ,
+                              ";                                     )))]      "
+                             ,
+                              ";                                     ...       "
+                             ,
+                              ";                                     )         "
+                             ,
+                              ";                                               "
+                             ,
+                              ";             (b) With type parameters          "
+                             ,
+                              ";                                               "
+                             ,
+                              ";  Desugaring [[implicit-data]] [*]             "
+                             ,
+";  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ "
+                             ,
+                              ";                                               "
+                             ,
+                        ";  Formally, [[implicit-data]] is syntactic sugar for "
+                             ,
+                        ";  [[data]]. It is desugared by one of two equations, "
+                             ,
+                      ";  depending on whether type parameters are present (\\ "
+                             ,
+                           ";  crefadt.fig.implicit-data-desugared). When type "
+                             ,
+                     ";  parameters are absent, every value constructor gets a "
+                             ,
+                       ";  monomorphic type. When type parameters are present, "
+                             ,
+                         ";  every value constructor is polymorphic in exactly "
+                             ,
+                    ";  those parameters. Type name \\stycon is applied to the "
+                             ,
+                      ";  parameters and is given a kind consistent with them. "
+                             ,
+                      ";  In the interpreter, the desugaring is implemented by "
+                             ,
+                    ";  function [[makeExplicit]] (\\crefadta.chap, \\cpageref "
+                             ,
+                              ";  adt.fun.makeExplicit).                       "
+                             ,
+                              ";                                               "
+                             ,
+                             ";  Predefined algebraic \\chaptocsplitdata types "
+                             ,
+                              ";                                               "
+                             ,
+                     ";  Many of the algebraic data types found in Standard ML "
+                             ,
+                        ";  are also predefined in uML. They are defined using "
+                             ,
+                     ";  [[data]] or [[implicit-data]]. In most cases, to make "
+                             ,
+                       ";  the types of the value constructors explicit, I use "
+                             ,
+                              ";  the [[data]] form.                           "
+                             ,
+                              ";                                               "
+                             ,
+                              ";  A Boolean is either [[#t]] or [[#f]].        "
                              , ";  <predefined uML types>=                   "
                              , "(data * bool"
                              , "  [#t : bool]"
@@ -8163,7 +8283,12 @@ fun assertPtype (x, t, (Gamma, Delta, _)) =
 fun processTests (tests, rho) =
       reportTestResults (numberOfGoodTests (tests, rho), length tests)
 and numberOfGoodTests (tests, rho) =
-  foldr (fn (t, n) => if testIsGood (t, rho) then n + 1 else n) 0 tests
+      let val testIsGood = fn args => (resetComputationLimits (); testIsGood
+                                                               args) in (*OMIT*)
+      foldr (fn (t, n) => if testIsGood (t, rho) then n + 1 else n) 0 tests
+      end
+                                                                                
+                                                                        (*OMIT*)
 (* \qbreak Function [[processTests]] is shared among all *)
 (* bridge languages. For each test, it calls the *)
 (* language-dependent [[testIsGood]], adds up the number *)
@@ -8191,7 +8316,7 @@ fun readEvalPrintWith errmsg (xdefs, basis, interactivity) =
               | try (DEFS ds)      = foldl processXDef basis (map DEF ds)
                                                                         (*OMIT*)
             fun caught msg = (errmsg (stripAtLoc msg); basis)
-            val _ = resetComputationLimits ()     (* OMIT *)
+            val () = resetComputationLimits ()     (* OMIT *)
         in  withHandlers try xd caught
         end 
       (* The extended-definition forms [[USE]] and [[TEST]] *)
@@ -8385,8 +8510,8 @@ val initialBasis =
          [ ";  <predefined uML functions>=               "
          , "(define null? (xs)"
          , "   (case xs"
-         , "      [(cons y ys) #t]"
-         , "      ['()         #f]))"
+         , "      [(cons y ys) #f]"
+         , "      ['()         #t]))"
          , ";;unboxuml"
          , ";  A fold function for a binary search tree is part of \\ "
          , ";  crefadt.ex.bst.                              "

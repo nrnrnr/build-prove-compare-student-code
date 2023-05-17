@@ -7,8 +7,8 @@
 (*                                                               *)
 (*****************************************************************)
 
-(* And all interpreters that implement type inference *)
-(* also incorporate these exceptions:           *)
+(* To infer the type of a [[LETSTAR]] form, we desugar *)
+(* it into nested [[LET]]s.                     *)
 (* <exceptions used in languages with type inference>= *)
 exception TypeError of string
 exception BugInTypeInference of string
@@ -28,9 +28,6 @@ fun snd (x, y) = y
 fun pair x y = (x, y)
 fun curry  f x y   = f (x, y)
 fun curry3 f x y z = f (x, y, z)
-(* Functions that serve as [[f]]'s are created in a *)
-(* variety of ways. Many such functions are Curried. *)
-(* Some of them are defined here.               *)
 (* <boxed values 197>=                          *)
 val _ = op fst    : ('a * 'b) -> 'a
 val _ = op snd    : ('a * 'b) -> 'b
@@ -69,6 +66,244 @@ val _ = op curry3 : ('a * 'b * 'c -> 'd) -> ('a -> 'b -> 'c -> 'd)
 (* abbreviations. Everything in the whole nest is *)
 (* mutually recursive. [*] [*]                  *)
 
+(* Interlude: micro-Scheme in ML                *)
+(*                                              *)
+(* [*] \invisiblelocaltableofcontents[*]        *)
+(*                                              *)
+(* {epigraph}Conversation with David R. Hanson, coauthor *)
+(* of A Retargetable C Compiler: Design and     *)
+(* Implementation\break\citep                   *)
+(* hanson-fraser:retargetable:book.             *)
+(*                                              *)
+(*  \myblock=\wd0 =0.8=0pt                      *)
+(*                                              *)
+(*  to \myblock\upshapeHanson: C is a lousy language *)
+(*  to write a compiler in.                     *)
+(*                                              *)
+(* {epigraph} The interpreters in \crefrange    *)
+(* impcore.chapgc.chap are written in C, which has much *)
+(* to recommend it: C is relatively small and simple; *)
+(* it is widely known and widely supported; its *)
+(* perspicuous cost model makes it is easy to discover *)
+(* what is happening at the machine level; and  *)
+(* it provides pointer arithmetic, which makes it a fine *)
+(* language in which to write a garbage collector. *)
+(* But for implementing more complicated or ambitious *)
+(* languages, C is less than ideal. In this and *)
+(* succeeding chapters, I therefore present interpreters *)
+(* written in the functional language Standard ML. *)
+(*                                              *)
+(* Standard ML is particularly well suited to symbolic *)
+(* computing, especially functions that operate on *)
+(* abstract-syntax trees; some advantages are detailed *)
+(* in the sidebar \vpagerefmlscheme.good-ml. And an *)
+(* ML program can illustrate connections between *)
+(* language design, formal semantics, and       *)
+(* implementations more clearly than a C program can. *)
+(* Infrastructure suitable for writing interpreters *)
+(* in ML is presented in this chapter and in \cref *)
+(* mlinterps.chap,lazyparse.chap. That infrastructure is *)
+(* introduced by using it to implement a language that *)
+(* is now familiar: micro-Scheme.               *)
+(*                                              *)
+(* {sidebar}[t]Helpful properties of the ML family of *)
+(* languages [*]                                *)
+(*                                              *)
+(*  \advance\parsepby -5.5pt \advance\itemsepby *)
+(*  -5.5pt \advanceby -0.5pt                    *)
+(*   • ML is safe: there are no unchecked run-time *)
+(*  errors, which means there are no faults that are *)
+(*  entirely up to the programmer to avoid.     *)
+(*   • Like Scheme, ML is naturally polymorphic. *)
+(*  Polymorphism simplifies everything. For example, *)
+(*  unlike the C code in \crefrange             *)
+(*  impcore.chapgcs.chap, the ML code in \crefrange *)
+(*  mlscheme.chapsmall.chap uses just one       *)
+(*  representation of lists and one length function. *)
+(*  As another example, where the C code in \cref *)
+(*  cinterps.chap defines three different types of *)
+(*  streams, each with its own [[get]] function, the *)
+(*  ML code in \crefmlinterps.chap defines one type *)
+(*  of stream and one [[streamGet]] function. And *)
+(*  when a job is done by just one polymorphic  *)
+(*  function, not a group of similar functions, you *)
+(*  know that the one function always does the same *)
+(*  thing.                                      *)
+(*   • Unlike Scheme, ML uses a static type system, and *)
+(*  this system guarantees that data structures are *)
+(*  internally consistent. For example, if one  *)
+(*  element of a list is a function, every element of *)
+(*  that list is a function. This happens without *)
+(*  requiring variable declarations or type     *)
+(*  annotations to be written in the code.      *)
+(*                                              *)
+(*  If talk of polymorphism mystifies you, don't *)
+(*  worry; polymorphism in programming languages is *)
+(*  an important topic in its own right. Polymorphism *)
+(*  is formally introduced and defined in \cref *)
+(*  typesys.chap, and the algorithms that ML uses to *)
+(*  provide polymorphism without type annotations are *)
+(*  described in \crefml.chap.                  *)
+(*   • Like Scheme, ML provides first-class, nested *)
+(*  functions, and its initial basis contains useful *)
+(*  higher-order functions. These functions help *)
+(*  simplify and clarify code. For example, they can *)
+(*  eliminate the special-purpose functions that the *)
+(*  C code uses to run a list of unit tests from back *)
+(*  to front; the ML code just uses [[foldr]].  *)
+(*   • To detect and signal errors, ML provides *)
+(*  exception handlers and exceptions, which are more *)
+(*  flexible and easier to use then C's [[setjmp]] *)
+(*  and [[longjmp]].                            *)
+(*   • Finally, least familiar but most important, *)
+(*  ML provides native support for algebraic data *)
+(*  types, which I use to represent both abstract *)
+(*  syntax and values. These types provide value *)
+(*  constructors like the [[IFX]] or [[APPLY]] used *)
+(*  in previous chapters, but instead of [[switch]] *)
+(*  statements, ML provides pattern matching. Pattern *)
+(*  matching enables ML programmers to write function *)
+(*  definitions that look like algebraic laws; such *)
+(*  definitions are easier to follow than C code. *)
+(*  The technique is demonstrated in the definition *)
+(*  of function [[valueString]] on \cpageref    *)
+(*  mlscheme.code.valueString. For a deeper dive into *)
+(*  algebraic data types, jump ahead to \crefadt.chap *)
+(*  and read through \crefadt.howto.            *)
+(*                                              *)
+(* {sidebar}                                    *)
+(*                                              *)
+(* The micro-Scheme interpreter in this chapter is *)
+(* structured in the same way as the interpreter in *)
+(* Chapter [->]. Like that interpreter, it has  *)
+(* environments, abstract syntax, primitives, an *)
+(* evaluator for expressions, and an evaluator for *)
+(* definitions. Many details are as similar as I can *)
+(* make them, but many are not: I want the interpreters *)
+(* to look similar, but even more, I want my ML code to *)
+(* look like ML and my C code to look like C.   *)
+(*                                              *)
+(* The ML code will be easier to read if you know my *)
+(* programming conventions.                     *)
+(*                                              *)
+(*   • My naming conventions are the ones recommended by *)
+(*  the SML'97 Standard Basis Library [cite     *)
+(*  gansner:basis]. Names of types are written in *)
+(*  lowercase letters with words separated by   *)
+(*  underscores, like [[exp]], [[def]], or      *)
+(*  [[unit_test]]. Names of functions and variables *)
+(*  begin with lowercase letters, like [[eval]] or *)
+(*  [[evaldef]], but long names may be written in *)
+(*  ``camel case'' with a mix of uppercase and  *)
+(*  lowercase letters, like [[processTests]] instead *)
+(*  of the C-style [[process_tests]]. (Rarely, I may *)
+(*  use an underscore in the name of a local    *)
+(*  variable.)                                  *)
+(*                                              *)
+(*  Names of exceptions are capitalized, like   *)
+(*  [[NotFound]] or [[RuntimeError]], and they use *)
+(*  camel case. Names of value constructors, which *)
+(*  identify alternatives in algebraic data types, *)
+(*  are written in all capitals, possibly with  *)
+(*  underscores, like [[IFX]], [[APPLY]], or    *)
+(*  [[CHECK_EXPECT]]—just like enumeration literals *)
+(*  in C.                                       *)
+(*   • \qtrim0.5 If you happen to be a seasoned *)
+(*  ML programmer, you'll notice something missing: *)
+(*  the interpreter is not decomposed into modules. *)
+(*  Modules get a book chapter of their own (\cref *)
+(*  mcl.chap), but compared to what's in \cref  *)
+(*  mcl.chap, Standard ML's module system is    *)
+(*  complicated and hard to understand. To avoid *)
+(*  explaining it, I define no modules—although I do *)
+(*  use ``dot notation'' to select functions that are *)
+(*  defined in Standard ML's predefined modules. *)
+(*  By avoiding module definitions, I enable you to *)
+(*  digest this chapter even if your only previous *)
+(*  functional-programming experience is with   *)
+(*  micro-Scheme.                               *)
+(*                                              *)
+(*  Because I don't use ML modules, I cannot easily *)
+(*  write interfaces or distinguish them from   *)
+(*  implementations. Instead, I use a           *)
+(*  literate-programming trick: I put the types of *)
+(*  functions and values, which is mostly what  *)
+(*  ML interfaces describe, in boxes preceding the *)
+(*  implementations. These types are checked by the *)
+(*  ML compiler, and the trick makes it possible to *)
+(*  present a function's interface just before its *)
+(*  implementation.                             *)
+(*                                              *)
+(* My code is also affected by two limitations of ML: *)
+(* ML is persnickety about the order in which   *)
+(* definitions appear, and it has miserable support for *)
+(* mutually recursive data definitions. These   *)
+(* limitations arise because unlike C, which has *)
+(* syntactic forms for both declarations and    *)
+(* definitions, ML has only definition forms.   *)
+(*                                              *)
+(* In C, as long as declarations precede definitions, *)
+(* you can be careless about the order in which both *)
+(* appear. Declare all your structures (probably in *)
+(* [[typedef]]s) in any order you like, and you can *)
+(* define them in just about any order you like. Then *)
+(* declare all your functions in any order you like, and *)
+(* you can define them in any order you like—even if *)
+(* your data structures and functions are mutually *)
+(* recursive. Of course there are drawbacks: not all *)
+(* variables are guaranteed to be initialized, and *)
+(* global variables can be initialized only in limited *)
+(* ways. And you can easily define mutually recursive *)
+(* data structures that allow you to chase pointers *)
+(* forever.                                     *)
+(*                                              *)
+(* In ML, there are no declarations, and you may write a *)
+(* definition only after the definitions of the things *)
+(* it refers to. Of course there are benefits: every *)
+(* definition initializes its name, and initialization *)
+(* may use any valid expression, including [[let]] *)
+(* expressions, which in ML can contain nested  *)
+(* definitions. And unless your code assigns to mutable *)
+(* reference cells, you cannot define circular data *)
+(* structures that allow you to chase pointers forever. *)
+(* As a consequence, unless a structurally recursive *)
+(* function fetches the contents of mutable reference *)
+(* cells, it is guaranteed to terminate. ML's designers *)
+(* thought this guarantee was more important than the *)
+(* convenience of writing data definitions in many *)
+(* orders. (And to be fair, using ML modules makes it *)
+(* relatively convenient to get things in the right *)
+(* order.)                                      *)
+(*                                              *)
+(* What about mutually recursive data? Suppose for *)
+(* example, that type [[exp]] refers to [[value]] and *)
+(* type [[value]] refers to [[exp]]? Mutually recursive *)
+(* definitions like [[exp]] and [[value]] must be *)
+(* written together, adjacent in the source code, *)
+(* connected with the keyword [[and]]. (You won't see *)
+(* [[and]] often, but when you do, please remember this: *)
+(* it means mutual recursion, never a Boolean   *)
+(* operation.)                                  *)
+(*                                              *)
+(* Mutually recursive function definitions provide more *)
+(* options: they can be joined with [[and]], but it is *)
+(* usually more convenient and more idiomatic to nest *)
+(* one inside the other using a [[let]] binding. You *)
+(* would use [[and]] only when both mutually recursive *)
+(* functions need to be called by some third, client *)
+(* function. When I use mutual recursion, I identify the *)
+(* technique I use. Now, on to the code!        *)
+(*                                              *)
+(* Names and \chaptocsplitenvironments\cull, with \ *)
+(* chaptocsplitintroduction to ML               *)
+(*                                              *)
+(* [*] In my C code, [[Name]] is an abstract type, and *)
+(* by design, two values of type [[Name]] can be *)
+(* compared using C's built-in [[==]] operator. In my ML *)
+(* code, because ML strings are immutable and can be *)
+(* meaningfully compared using ML's built-in [[=]] *)
+(* operator, names are represented as strings. \mlslabel *)
+(* name                                         *)
 (* <support for names and environments>=        *)
 type name = string
 (* ML's [[type]] syntax is like C's [[typedef]]; *)
@@ -215,6 +450,14 @@ fun mkEnv (xs, vs) = bindList (xs, vs, emptyEnv)
 (* composition *)
 infix 6 <+>
 fun pairs <+> pairs' = pairs' @ pairs
+(* The representation guarantees that there is an [['a]] *)
+(* for every [[name]].                          *)
+(*                                              *)
+(* \setcodemargin7pt                            *)
+(*                                              *)
+(* The empty environment is represented by the empty *)
+(* list. In ML, that's written using square brackets. *)
+(* The [[val]] form is like micro-Scheme's [[val]] form. *)
 (* <boxed values 1>=                            *)
 val _ = op emptyEnv : 'a env
 (* (The phrase in the box is like a declaration that *)
@@ -243,18 +486,6 @@ val _ = op find : name * 'a env -> 'a
 val _ = op bind : name * 'a * 'a env -> 'a env
 (* \mlsflabelbind                               *)
 
-(* Even though an \monobox'a env is a list of pairs, *)
-(* functions that operate on two lists, like those in \ *)
-(* crefimpcore.chap,scheme.chap, are still useful. *)
-(* Function [[bindList]] adds a sequence of bindings to *)
-(* an environment; it is used to implement      *)
-(* micro-Scheme's [[let]] and [[lambda]]. If the lists *)
-(* aren't the same length, it raises another exception. *)
-(* Function [[bindList]] resembles \crefscheme.chap's *)
-(* [[bindalloclist]], but it does not allocate. Related *)
-(* function [[mkEnv]] manufactures a new environment *)
-(* given just a list of names and [['a]]'s. \mlsflabel *)
-(* bindList,mkEnv                               *)
 (* <boxed values 1>=                            *)
 val _ = op bindList : name list * 'a list * 'a env -> 'a env
 val _ = op mkEnv    : name list * 'a list -> 'a env
@@ -273,14 +504,6 @@ fun duplicatename [] = NONE
         SOME x
       else
         duplicatename xs
-(* Duplicate names and internal errors          *)
-(*                                              *)
-(* In bridge-language binding constructs, like  *)
-(* [[lambda]], duplicate names are treated as errors. *)
-(* Such names are detected by function          *)
-(* [[duplicatename]]. If a name x occurs more than twice *)
-(* on a list, [[duplicatename]] returns \monoSOME x; *)
-(* otherwise it returns [[NONE]].               *)
 (* <boxed values 96>=                           *)
 val _ = op duplicatename : name list -> name option
 (* <support for names and environments>=        *)
@@ -303,9 +526,13 @@ fun disjointUnion envs =
 (* inference, not during evaluation.            *)
 (* <boxed values 165>=                          *)
 val _ = op disjointUnion : 'a env list -> 'a env
+(* All interpreters incorporate these two exceptions: *)
 (* <exceptions used in every interpreter>=      *)
 exception RuntimeError of string (* error message *)
 exception LeftAsExercise of string (* string identifying code *)
+(* Some errors might be caused not by a fault in a *)
+(* user's code but in my interpreter code. Such faults *)
+(* are signaled by the [[InternalError]] exception. *)
 (* <support for detecting and signaling errors detected at run time>= *)
 exception InternalError of string (* bug in the interpreter *)
 (* <list functions not provided by \sml's initial basis>= *)
@@ -319,16 +546,16 @@ fun unzip3 [] = ([], [], [])
 fun zip3 ([], [], []) = []
   | zip3 (x::xs, y::ys, z::zs) = (x, y, z) :: zip3 (xs, ys, zs)
   | zip3 _ = raise ListPair.UnequalLengths
-(* Code used to debug parsers                   *)
+(* \qbreak                                      *)
 (*                                              *)
-(* When debugging parsers, I often find it helpful to *)
-(* dump out the tokens that a parser is looking at. *)
-(* I want to dump only the tokens that are available *)
-(* without triggering the action of reading another line *)
-(* of input. To get those tokens, function      *)
-(* [[safeTokens]] reads until it has got to both an *)
-(* end-of-line marker and a suspension whose value has *)
-(* not yet been demanded.                       *)
+(* List utilities                               *)
+(*                                              *)
+(* Most of the list utilities anyone would need are part *)
+(* of the initial basis of Standard ML. But the type *)
+(* checker for pattern matching in \crefadt.chap *)
+(* sometimes needs to unzip a list of triples into a *)
+(* triple of lists. I define [[unzip3]] and also the *)
+(* corresponding [[zip3]].                      *)
 (* <boxed values 94>=                           *)
 val _ = op unzip3 : ('a * 'b * 'c) list -> 'a list * 'b list * 'c list
 val _ = op zip3   : 'a list * 'b list * 'c list -> ('a * 'b * 'c) list
@@ -364,6 +591,10 @@ val _ = op intString : int -> string
 (* well, but not quite---the abstract syntax of *)
 (* [[DEFINE]] is different.                     *)
 
+(* To characterize a list by its length and contents, *)
+(* interpreter messages use strings like        *)
+(* ``3 arguments,'' which come from functions [[plural]] *)
+(* and [[countString]].                         *)
 (* <utility functions for string manipulation and printing>= *)
 fun plural what [x] = what
   | plural what _   = what ^ "s"
@@ -416,6 +647,11 @@ val _ = op commaSep : string list -> string
 (* <utility functions for string manipulation and printing>= *)
 fun nullOrCommaSep empty [] = empty
   | nullOrCommaSep _     ss = commaSep ss                   
+(* Sometimes, as when printing substitutions for *)
+(* example, the empty list should be represented by *)
+(* something besides the empty string. Like maybe the *)
+(* string [["idsubst"]]. Such output can be produced by, *)
+(* e.g., [[nullOrCommaSep "idsubst"]].          *)
 (* <boxed values 88>=                           *)
 val _ = op nullOrCommaSep : string -> string list -> string
 (* <utility functions for string manipulation and printing>= *)
@@ -446,24 +682,6 @@ val _ = op fnvHash : string -> int
 (* [[freshtyvar]]. The constraint is represented just as *)
 (* written in the rule.                         *)
 
-(* Utility functions for printing               *)
-(*                                              *)
-(* For writing values and other information to standard *)
-(* output, Standard ML provides a simple [[print]] *)
-(* primitive, which writes a string. Anything more *)
-(* sophisticated, such as writing to standard error, *)
-(* requires using the the [[TextIO]] module, which is *)
-(* roughly analogous to C's [[<stdio.h>]]. Using *)
-(* [[TextIO]] can be awkward, so I define three *)
-(* convenience functions. Function [[println]] is like *)
-(* [[print]], but it writes a string followed by a *)
-(* newline. Functions [[eprint]] and [[eprintln]] are *)
-(* analogous to [[print]] and [[println]], but they *)
-(* write to standard error. \qbreak More sophisticated *)
-(* printing functions (\crefpage,sec:print-interface) *)
-(* would be lovely, but making such functions type-safe *)
-(* requires code that beginning ML programmers would *)
-(* find baffling.                               *)
 (* <utility functions for string manipulation and printing>= *)
 fun println  s = (print s; print "\n")
 fun eprint   s = TextIO.output (TextIO.stdErr, s)
@@ -471,14 +689,6 @@ fun eprintln s = (eprint s; eprint "\n")
 (* <utility functions for string manipulation and printing>= *)
 fun predefinedFunctionError s =
   eprintln ("while reading predefined functions, " ^ s)
-(* Not all printing is directed to standard output or *)
-(* standard error. To implement the [[check-print]] unit *)
-(* test (uSmalltalk, \crefsmall.chap), printing must be *)
-(* directed to a buffer. Functions [[xprint]] and *)
-(* [[xprintln]] direct output either to standard output *)
-(* or to a buffer, depending on what printing function *)
-(* is currently stored in the mutable reference cell *)
-(* [[xprinter]].                                *)
 (* <utility functions for string manipulation and printing>= *)
 val xprinter = ref print
 fun xprint   s = !xprinter s
@@ -515,6 +725,11 @@ fun bprinter () =
       fun contents () = concat (rev (!buffer))
   in  (bprint, contents)
   end
+(* \qtrim2                                      *)
+(*                                              *)
+(* Function [[xprint]] is used by function      *)
+(* [[printUTF8]], which prints a Unicode character using *)
+(* the Unicode Transfer Format (UTF-8).         *)
 (* <utility functions for string manipulation and printing>= *)
 fun printUTF8 code =
   let val w = Word.fromInt code
@@ -545,27 +760,17 @@ fun printUTF8 code =
       else
         printbyte w
   end
-(* Utility functions for renaming variables     *)
+(* The internal function [[kind]] computes the kind of  *)
+(* [[tau]]; the environment [[Delta]] is assumed. *)
+(* Function [[kind]] implements the kinding rules in the *)
+(* same way that [[typeof]] implements the typing rules *)
+(* and [[eval]] implements the operational semantics. *)
 (*                                              *)
-(* In the theory of programming languages, it's common *)
-(* to talk about fresh names, where ``fresh'' means *)
-(* ``different from any name in the program or its *)
-(* environment'' (\creftypesys.chap,ml.chap,adt.chap). *)
-(* And if you implement a type checker for a polymorphic *)
-(* language like Typed uScheme, or if you implement type *)
-(* inference, or if you ever implement the lambda *)
-(* calculus, you will need code that generates fresh *)
-(* names. You can always try names like [[t1]], [[t2]], *)
-(* and so on. But if you want to debug, it's usually *)
-(* helpful to relate the fresh name to a name already in *)
-(* the program. I like to do this by tacking on a *)
-(* numeric suffix; for example, to get a fresh name *)
-(* that's like [[x]], I might try [[x-1]], [[x-2]], and *)
-(* so on. But if the process iterates, I don't want to *)
-(* generate a name like [[x-1-1-1]]; I'd much rather *)
-(* generate [[x-3]]. This utility function helps by *)
-(* stripping off any numeric suffix to recover the *)
-(* original [[x]].                              *)
+(* The kind of a type variable is looked up in the *)
+(* environment. \usetyKindIntroVar Thanks to the parser *)
+(* in \creftuschemea.parser, the name of a type variable *)
+(* always begins with a quote mark, so it is distinct *)
+(* from any type constructor. \tusflabelkind    *)
 (* <utility functions for string manipulation and printing>= *)
 fun stripNumericSuffix s =
       let fun stripPrefix []         = s   (* don't let things get empty *)
@@ -663,13 +868,13 @@ val _ = op >>= : 'a error * ('a -> 'b error) -> 'b error
 (* A very common special case occurs when the   *)
 (* continuation always succeeds; that is, the   *)
 (* continuation [[k']] has type \monobox'a -> 'b instead *)
-(* of \monobox'a -> b error. In this case, the execution *)
-(* plan is that when [[(f x)]] succeeds, continue by *)
-(* applying [[k']] to the result; otherwise propagate *)
-(* the error. I know of no standard way to write this *)
-(* operator, [Haskell uses [[flip fmap]].] , so I use  *)
-(* [[>>=+]], which you might also choose to pronounce *)
-(* ``and then.''                                *)
+(* of \monobox'a -> 'b error. In this case, the *)
+(* execution plan is that when [[(f x)]] succeeds, *)
+(* continue by applying [[k']] to the result; otherwise *)
+(* propagate the error. I know of no standard way to *)
+(* write this operator, [Haskell uses [[flip fmap]].] , *)
+(* so I use [[>>=+]], which you might also choose to *)
+(* pronounce ``and then.''                      *)
 
 (* <support for representing errors as \ml\ values>= *)
 infix 1 >>=+
@@ -702,14 +907,6 @@ val _ = op errorList : 'a error list -> 'a list error
 (* [[freshtyvar]]. The constraint is represented just as *)
 (* written in the rule.                         *)
 
-(* \qbreak                                      *)
-(*                                              *)
-(* Cases and code \chaptocsplitfor Chapter \adtchapnum *)
-(*                                              *)
-(* \Nml is the foundation for uML (\crefadt.chap), which *)
-(* adds cases for pattern matching and algebraic data *)
-(* types. The following code chunks are placeholders for *)
-(* code that is added in \crefadt.chap.         *)
 (* <support for representing errors as \ml\ values>= *)
 fun errorLabel s (OK x) = OK x
   | errorLabel s (ERROR msg) = ERROR (s ^ msg)
@@ -777,6 +974,9 @@ fun prompts (PROMPTING,     _) = true
   | prompts (NOT_PROMPTING, _) = false
 fun echoes (_, ECHOING)     = true
   | echoes (_, NOT_ECHOING) = false
+(* The two of information together form a value of type *)
+(* [[interactivity]]. Such a value can be queried by *)
+(* predicates [[prompts]] and [[print]].        *)
 (* <boxed values 131>=                          *)
 type interactivity = interactivity
 val _ = op noninteractive : interactivity
@@ -841,24 +1041,6 @@ local
     getOpt (Option.map split (OS.Process.getEnv "BPCOPTIONS"), [])
 in
   fun hasOption s = member s optionTokens
-(* Raising [[InternalError]] is the equivalent of an *)
-(* assertion failure in a language like C.      *)
-(*                                              *)
-(* I must not confuse [[InternalError]] with    *)
-(* [[RuntimeError]]. When the interpreter raises *)
-(* [[RuntimeError]], it means that a user's program got *)
-(* stuck: evaluation led to a state in which the *)
-(* operational semantics couldn't make progress. *)
-(* The fault is the user's. But when the interpreter *)
-(* raises [[InternalError]], it means there is a fault *)
-(* in my code; the user's program is blameless. *)
-(*                                              *)
-(* Control by environment variable              *)
-(*                                              *)
-(* Environment variable [[BPCOPTIONS]], if set, contains *)
-(* a comma-separated list of flags like [[throttle]] or *)
-(* [[norun]]. Function [[hasOption]] detects if a flag *)
-(* is present.                                  *)
 (* <boxed values 97>=                           *)
 val _ = op hasOption : string -> bool
 end
@@ -867,18 +1049,6 @@ datatype 'a collection = C of 'a set
 fun elemsC (C xs) = xs
 fun singleC x     = C [x]
 val emptyC        = C []
-(* \qbreak                                      *)
-(*                                              *)
-(* Collections                                  *)
-(*                                              *)
-(* [*] In the functions above, a set has the same *)
-(* representation as a list, and they can be used *)
-(* interchangeably. Sometimes, however, the thing you're *)
-(* collecting is itself a set, and you want to  *)
-(* distinguish the two forms of set (for an example, see *)
-(* \crefpageadt.ex.exhaustiveness). For that purpose, *)
-(* I define a type [[collection]] that is distinct from *)
-(* the set/list type.                           *)
 (* <boxed values 92>=                           *)
 type 'a collection = 'a collection
 val _ = op elemsC  : 'a collection -> 'a set
@@ -889,6 +1059,45 @@ fun joinC     (C xs) = C (List.concat (map elemsC xs))
 fun mapC  f   (C xs) = C (map f xs)
 fun filterC p (C xs) = C (List.filter p xs)
 fun mapC2 f (xc, yc) = joinC (mapC (fn x => mapC (fn y => f (x, y)) yc) xc)
+(* The [[collection]] type is intended to be used some *)
+(* more functions that are defined below. In particular, *)
+(* functions [[joinC]] and [[mapC]], together with *)
+(* [[singleC]], form a monad. (If you've heard of *)
+(* monads, you may know that they are a useful  *)
+(* abstraction for containers and collections of all *)
+(* kinds; they also have more exotic uses, such as *)
+(* expressing input and output as pure functions. The  *)
+(* [[collection]] type is the monad for nondeterminism, *)
+(* which is to say, all possible combinations or *)
+(* outcomes. If you know about monads, you may have *)
+(* picked up some programming tricks you can reuse. But *)
+(* you don't need to know monads to do any of the *)
+(* exercises in this book.)                     *)
+(*                                              *)
+(* The key functions on collections are as follows: *)
+(*                                              *)
+(*   • Functions [[mapC]] and [[filterC]] do for *)
+(*  collections what [[map]] and [[filter]] do for *)
+(*  lists.                                      *)
+(*   • Function [[joinC]] takes a collection of *)
+(*  collections of tau's and reduces it to a single *)
+(*  collection of tau's. When [[mapC]] is used with a *)
+(*  function that itself returns a collection,  *)
+(*  [[joinC]] usually follows, as exemplified in the *)
+(*  implementation of [[mapC2]] below.          *)
+(*   • Function [[mapC2]] is the most powerful of *)
+(*  all—its type resembles the type of Standard ML's *)
+(*  [[ListPair.map]], but it works differently: where *)
+(*  [[ListPair.map]] takes elements pairwise,   *)
+(*  [[mapC2]] takes all possible combinations.  *)
+(*  In particular, if you give [[ListPair.map]] two *)
+(*  lists containing N and M elements respectively, *)
+(*  the number of elements in the result is min(N,M). *)
+(*  If you give collections of size N and M to  *)
+(*  [[mapC2]], the number of elements in the result *)
+(*  is N\atimesM.                               *)
+(*                                              *)
+(* \nwnarrowboxes                               *)
 (* <boxed values 93>=                           *)
 val _ = op joinC   : 'a collection collection -> 'a collection
 val _ = op mapC    : ('a -> 'b)      -> ('a collection -> 'b collection)
@@ -949,6 +1158,8 @@ fun demand cell =
                      in  (cell := PRODUCED result; result)
                      end
      | PRODUCED v => v
+(* \qbreak Functions [[delay]] and [[demand]] convert to *)
+(* and from suspensions.                        *)
 (* <boxed values 108>=                          *)
 val _ = op delay  : (unit -> 'a) -> 'a susp
 val _ = op demand : 'a susp -> 'a
@@ -1248,6 +1459,9 @@ val _ = op streamZip : 'a stream * 'b stream -> ('a * 'b) stream
 val _ = op streamConcat : 'a stream stream -> 'a stream
 (* <streams>=                                   *)
 fun streamConcatMap f xs = streamConcat (streamMap f xs)
+(* In list and stream processing, [[concat]] is very *)
+(* often composed with [[map f]]. The composition is *)
+(* usually called [[concatMap]].                *)
 (* <boxed values 121>=                          *)
 val _ = op streamConcatMap : ('a -> 'b stream) -> 'a stream -> 'b stream
 (* <streams>=                                   *)
@@ -1289,6 +1503,9 @@ fun streamDrop (0, xs) = xs
       case streamGet xs
         of SOME (_, xs) => streamDrop (n-1, xs)
          | NONE => EOS
+(* Once I've used [[streamTake]], I get the rest of the *)
+(* stream with [[streamDrop]] (\chunkref        *)
+(* mlinterps.chunk.use-streamDrop).             *)
 (* <boxed values 124>=                          *)
 val _ = op streamDrop : int * 'a stream -> 'a stream
 (* <stream transformers and their combinators>= *)
@@ -1491,36 +1708,6 @@ val _ = op <$> : ('b -> 'c) * ('a, 'b) xformer -> ('a, 'c) xformer
 (* <stream transformers and their combinators>= *)
 infix 1 <|>
 fun t1 <|> t2 = (fn xs => case t1 xs of SOME y => SOME y | NONE => t2 xs) 
-(* As an example, if a name is parsed by [[name]] and an *)
-(* expression is parsed by [[exp]], then a name followed *)
-(* by an expression, such as might appear in a [[let]] *)
-(* binding, can be turned into (name, expression) pair *)
-(* by the parser {nwverbatim} pair <> name <*> exp  *)
-(* {nwverbatim} (Parsing the actual micro-Scheme syntax *)
-(* would also require a parser to handle the surrounding *)
-(* parentheses.) As another example, if a micro-Scheme *)
-(* parser has seen a left bracket followed by the *)
-(* keyword [[if]], it can call the parser {nwverbatim} *)
-(* curry3 IFX <> exp <*> exp <*> exp {nwverbatim} which *)
-(* creates the abstract-syntax tree for an [[if]] *)
-(* expression.                                  *)
-(*                                              *)
-(* The combinator [[<*>]] creates parsers that read *)
-(* things in sequence; but it can't make a choice. *)
-(* If any parser in the sequence fails, the whole *)
-(* sequence fails. A choice, as in ``[[val]] or *)
-(* expression or [[define]] or [[use]],'' is made by a *)
-(* choice operator. The choice operator is written *)
-(* [[<|>]] and pronounced ``or.'' If [[t1]] and [[t2]] *)
-(* are both \atob transformers, then \monoboxt1 <|> t2 *)
-(* is an \atob transformer that first tries [[t1]], then *)
-(* tries [[t2]]. Transformer \monoboxt1 <|> t2 succeeeds *)
-(* if either [[t1]] or [[t2]] succeeds, detects an error *)
-(* if either [[t1]] or [[t2]] detects an error, and *)
-(* fails only if both [[t1]] and [[t2]] fail. To assure *)
-(* that \monoboxt1 <|> t2 has a predictable type no *)
-(* matter which transformer is chosen, both [[t1]] and  *)
-(* [[t2]] have to have the same type.           *)
 (* <boxed values 198>=                          *)
 val _ = op <|> : ('a, 'b) xformer * ('a, 'b) xformer -> ('a, 'b) xformer
 (* [[funty]] stand for \tau, [[actualtypes]]    *)
@@ -1630,12 +1817,6 @@ val _ = op one : ('a, 'a) xformer
 fun eos xs = case streamGet xs
                of NONE => SOME (OK (), EOS)
                 | SOME _ => NONE
-(* The counterpart of [[one]] is a parser that succeeds *)
-(* if and only if there is no input—that is, if it is *)
-(* parsing the end of a stream. This parser, which is *)
-(* called [[eos]] (``end of stream''), can produce no *)
-(* useful result, so it produces the empty tuple, which *)
-(* has type [[unit]].                           *)
 (* <boxed values 202>=                          *)
 val _ = op eos : ('a, unit) xformer
 (* [[funty]] stand for \tau, [[actualtypes]]    *)
@@ -1697,42 +1878,6 @@ fun sat p tx xs =
   case tx xs
     of answer as SOME (OK y, xs) => if p y then answer else NONE
      | answer => answer
-(* Parsing combinators                          *)
-(*                                              *)
-(* Real parsers use [[<>]], [[<*>]], [[<|>]], and *)
-(* [[one]] as a foundation, then add ideas like these: *)
-(*                                              *)
-(*   • Maybe the parser should succeed only if an input *)
-(*  satisfies certain conditions. For example, if *)
-(*  I want to parse numeric literals, I might want a *)
-(*  character parser that succeeds only when the *)
-(*  character is a digit.                       *)
-(*   • Most utterances in programming languages are made *)
-(*  by composing things in sequence. For example, in *)
-(*  micro-Scheme, the characters in an identifier are *)
-(*  a nonempty sequence of ``ordinary'' characters. *)
-(*  And the arguments in a function application are a *)
-(*  possibly empty sequence of expressions. Parser *)
-(*  combinators for sequences are useful!       *)
-(*   • Although I've avoided using ``optional'' syntax *)
-(*  in the bridge languages, many, many programming *)
-(*  languages do use constructs in which parts are *)
-(*  optional. For example, in C, the use of an  *)
-(*  [[else]] clause with an [[if]] statement is *)
-(*  optional. A parser combinator for this idiom can *)
-(*  also be useful.                             *)
-(*                                              *)
-(* This section presents standard parsing combinators *)
-(* that help implement conditional parsers, parsers for *)
-(* sequences, and parsers for optional syntax.  *)
-(*                                              *)
-(* Parsers based on conditions                  *)
-(*                                              *)
-(* Combinator [[sat]] wraps an \atob transformer with a *)
-(* B-predicate such that the wrapped transformer *)
-(* succeeds only when the underlying transformer *)
-(* succeeds and produces a value that satisfies the *)
-(* predicate.                                   *)
 (* <boxed values 205>=                          *)
 val _ = op sat : ('b -> bool) -> ('a, 'b) xformer -> ('a, 'b) xformer
 (* <stream transformers and their combinators>= *)
@@ -1810,14 +1955,6 @@ fun notFollowedBy t xs =
   case t xs
     of NONE => SOME (OK (), xs)
      | SOME _ => NONE
-(* A transformer can be complemented, turning success *)
-(* into failure and vice versa. Transformer \monobox *)
-(* notFollowedBy t succeeds if and only if [[t]] fails. *)
-(* Transformer \monoboxnotFollowedBy t may look at *)
-(* input, but it never consumes any input. This *)
-(* transformer is used when trying to read an integer *)
-(* literal, to make sure that the digits are not *)
-(* followed by a letter or other non-delimiting symbol. *)
 (* <boxed values 209>=                          *)
 val _ = op notFollowedBy : ('a, 'b) xformer -> ('a, unit) xformer
 (* <stream transformers and their combinators>= *)
@@ -1925,6 +2062,28 @@ fun tx_ef <*>! tx_x =
               | SOME (ERROR msg,      xs) => SOME (ERROR msg, xs)
 infixr 4 <$>!
 fun ef <$>! tx_x = pure ef <*>! tx_x
+(* Transformers made with [[many]] and [[optional]] *)
+(* succeed even when there is no input. They also *)
+(* succeed when there is input that they don't  *)
+(* recognize.                                   *)
+(*                                              *)
+(* Error-detecting transformers and their composition *)
+(*                                              *)
+(* Sometimes an error is detected not by a parser but by *)
+(* a function that is applied to the results of parsing. *)
+(* A classic example is a function definition: if the *)
+(* formal parameters are syntactically correct but *)
+(* contain a duplicate name, an error should be *)
+(* signaled. Formal parameters could be handled by a *)
+(* parser whose result type is \monoboxname list *)
+(* error—but every transformer type already includes the *)
+(* possibility of error! I would prefer that the *)
+(* parser's result type be just \monoboxname list, and *)
+(* that if duplicate names are detected, that the error *)
+(* be managed in the same way as a syntax error. *)
+(* To enable such management, I define [[<*>!]] and [[< *)
+(* >!]] combinators, which merge function-detected *)
+(* errors with parser-detected errors. \nwnarrowboxes *)
 (* <boxed values 213>=                          *)
 val _ = op <*>! : ('a, 'b -> 'c error) xformer * ('a, 'b) xformer -> ('a, 'c)
                                                                          xformer
@@ -1946,29 +2105,12 @@ fun srclocString (source, line) =
 (* <support for source-code locations and located streams>= *)
 datatype error_format = WITH_LOCATIONS | WITHOUT_LOCATIONS
 val toplevel_error_format = ref WITH_LOCATIONS
-(* Both [[many]] and [[many1]] are ``greedy''; that is, *)
-(* they repeat [[t]] as many times as possible. Client *)
-(* code has to be careful to ensure that calls to *)
-(* [[many]] and [[many1]] terminate. In particular, if *)
-(* [[t]] can succeed without consuming any input, then \ *)
-(* monoboxmany t does not terminate. To pass [[many]] a *)
-(* transformer that succeeds without consuming input is *)
-(* therefor an unchecked run-time error. The same goes *)
-(* for [[many1]].                               *)
-(*                                              *)
-(* Client code also has to be careful that when [[t]] *)
-(* sees something it doesn't recognize, it doesn't *)
-(* signal an error. In particular, [[t]] had better not *)
-(* be built with the [[<?>]] operator defined in \ *)
-(* chunkrefmlinterps.chunk.<?> below.           *)
-(*                                              *)
-(* Sometimes instead of zero, one, or many B's, concrete *)
-(* syntax calls for zero or one; such a B might be *)
-(* called ``optional.'' For example, a numeric literal *)
-(* begins with an optional minus sign. Function *)
-(* [[optional]] turns an \atob transformer into an \atox *)
-(* optional-B transformer. Like \monoboxmany t, \monobox *)
-(* optional t always succeeds.                  *)
+(* The format is consulted by function [[synerrormsg]], *)
+(* which produces the message that accompanies a syntax *)
+(* error. The source location may be omitted only for *)
+(* standard input; error messages about files loaded *)
+(* with [[use]] are always accompanied by source-code *)
+(* locations.                                   *)
 (* <support for source-code locations and located streams>= *)
 fun synerrormsg (source, line) strings =
   if !toplevel_error_format = WITHOUT_LOCATIONS
@@ -1979,8 +2121,6 @@ fun synerrormsg (source, line) strings =
     concat ("syntax error in " :: srclocString (source, line) :: ": " :: strings
                                                                                )
 
-(* The same format determines how warnings are  *)
-(* delivered.                                   *)
 (* <support for source-code locations and located streams>= *)
 fun warnAt (source, line) strings =
   ( app eprint
@@ -2002,21 +2142,6 @@ fun warnAt (source, line) strings =
 exception Located of srcloc * exn
 (* <support for source-code locations and located streams>= *)
 type 'a located = srcloc * 'a
-(* Tracking and reporting source-code locations *)
-(*                                              *)
-(* An error message is more informative if it says where *)
-(* the error occurred. ``Where'' means a source-code *)
-(* location. Compilers that take themselves seriously *)
-(* report source-code locations right down to the *)
-(* individual character: file broken.c, line 12, *)
-(* column 17. In production compilers, such precision is *)
-(* admirable. But in a pedagogical interpreter, *)
-(* precision sometimes gives way to simplicity. A good *)
-(* compromise is to track only source file and line *)
-(* number. That's precise enough to help programmers *)
-(* find errors, and it simplifies the implementation by *)
-(* eliminating the bookkeeping that would otherwise be *)
-(* needed to track column numbers.              *)
 (* <boxed values 126>=                          *)
 type srcloc = srcloc
 val _ = op srclocString : srcloc -> string
@@ -2032,6 +2157,11 @@ type 'a located = 'a located
 fun atLoc loc f a =
   f a handle e as RuntimeError _ => raise Located (loc, e)
            | e as NotFound _     => raise Located (loc, e)
+           (* In addition to exceptions that I have defined, *)
+           (* [[atLoc]] also recognizes and wraps some of Standard *)
+           (* ML's predefined exceptions. Handlers for even more *)
+           (* exceptions, like [[TypeError]], can be added using *)
+           (* Noweb.                                       *)
            (* <more handlers for [[atLoc]]>=               *)
            | e as IO.Io _   => raise Located (loc, e)
            | e as Div       => raise Located (loc, e)
@@ -2239,37 +2369,16 @@ end
 (* <boxed values 222>=                          *)
 type 'a eol_marked = 'a eol_marked
 val _ = op drainLine : 'a eol_marked stream -> 'a eol_marked stream
+(* \qbreak To support a stream of marked lines—possibly *)
+(* marked, located lines—I define transformers [[eol]], *)
+(* [[inline]], and [[srcloc]]. The [[eol]] transformer *)
+(* returns the number of the line just ended.   *)
 (* <boxed values 222>=                          *)
 val _ = op eol      : ('a eol_marked, int) xformer
 val _ = op inline   : ('a eol_marked, 'a)  xformer
 val _ = op srcloc   : ('a located eol_marked, srcloc) xformer
 (* <support for lexical analysis>=              *)
 type 'a lexer = (char, 'a) xformer
-(* Lexical analyzers: transformers of characters *)
-(*                                              *)
-(* The interpreters in this book consume one line at a *)
-(* time. But characters within a line may be split into *)
-(* multiple tokens. For example, the line       *)
-(*                                              *)
-(*   (define list1 (x) (cons x '()))            *)
-(*                                              *)
-(* should be split into the tokens {indented}   *)
-(* (                                            *)
-(* define                                       *)
-(* list1                                        *)
-(* (                                            *)
-(* x                                            *)
-(* )                                            *)
-(* (                                            *)
-(* cons                                         *)
-(* x                                            *)
-(* '                                            *)
-(* (                                            *)
-(* )                                            *)
-(* )                                            *)
-(* ) {indented} This section defines reusable,  *)
-(* specialized transformers that transform streams of *)
-(* characters into something else, usually tokens. *)
 (* <boxed values 214>=                          *)
 type 'a lexer = 'a lexer
 (* The type [['a lexer]] should be pronounced ``lexer *)
@@ -2278,18 +2387,6 @@ type 'a lexer = 'a lexer
 (* <support for lexical analysis>=              *)
 fun isDelim c =
   Char.isSpace c orelse Char.contains "()[]{};" c
-(* In popular languages, a character like a semicolon or *)
-(* comma usually does not join with other tokens to form *)
-(* a character. In this book, left and right brackets of *)
-(* all shapes keep to themselves and don't group with *)
-(* other characters. And in just about every    *)
-(* non-esoteric language, blank space separates tokens. *)
-(* A character whose presence marks the end of one token *)
-(* (and possibly the beginning of the next) is called a *)
-(* delimiter. In this book, the main delimiter  *)
-(* characters are whitespace and brackets. The other *)
-(* delimiter is the semicolon, which introduces a *)
-(* comment. [*]                                 *)
 (* <boxed values 215>=                          *)
 val _ = op isDelim : char -> bool
 (* [[                                           *)
@@ -2415,17 +2512,6 @@ fun intFromChars (#"-" :: cs) =
       (OK o valOf o Int.fromString o implode) cs
       handle Overflow =>
         ERROR "this interpreter can't read arbitrarily large integers"
-(* Function [[intFromChars]] composes three functions *)
-(* from Standard ML's initial basis. Function   *)
-(* [[implode]] converts a list of characters to a *)
-(* string; [[Int.fromString]] converts a string to an \ *)
-(* monoboxint option (raising [[Overflow]] if the *)
-(* literal is too big); and [[valOf]] converts an \ *)
-(* monoboxint option to an [[int]]. The [[Int. ]] *)
-(* function, which is used when I see a minus sign, *)
-(* negates an integer. The [[ ]] is meant to resemble a *)
-(* ``high minus'' sign, a notational convention that *)
-(* goes back at least to \apl.                  *)
 (* <boxed values 218>=                          *)
 val _ = op intFromChars : char list -> int error
 (* <support for lexical analysis>=              *)
@@ -2511,6 +2597,8 @@ fun rightString ROUND  = ")"
 fun plusBracketsString _   (LEFT shape)  = leftString shape
   | plusBracketsString _   (RIGHT shape) = rightString shape
   | plusBracketsString pts (PRETOKEN pt)  = pts pt
+(* For debugging and error messages, brackets and tokens *)
+(* can be converted to strings.                 *)
 (* <boxed values 221>=                          *)
 val _ = op plusBracketsString : ('a -> string) -> ('a plus_brackets -> string)
 (* <common parsing code>=                       *)
@@ -2586,12 +2674,6 @@ fun asAscii p =
 (* <combinators and utilities for parsing located streams>= *)
 infix 0 <?>
 fun p <?> what = p <|> synerrorAt ("expected " ^ what) <$>! srcloc
-(* I usually want names to contain only printing ASCII *)
-(* characters. Imagine a student who thinks they've *)
-(* written a minus sign but has actually written some *)
-(* accursed Unicode character that looks just like a *)
-(* minus sign. Nobody is more confused or frustrated, *)
-(* and justifiably so.                          *)
 (* <boxed values 225>=                          *)
 val _ = op asAscii : ('t, string) polyparser -> ('t, string) polyparser
 (* Parsers that report errors                   *)
@@ -2762,9 +2844,6 @@ val _ = op badRight : string -> ('t plus_brackets, 'a) polyparser
 fun notCurly (_, CURLY) = false
   | notCurly _          = true
 fun leftCurly tokens = sat (not o notCurly) left tokens
-(* With the bracket parsers defined, I can use Noweb to *)
-(* drop the definition of function [[errorAtEnd]] into *)
-(* this spot.                                   *)
 (* <transformers for interchangeable brackets>= *)
 (* <definition of function [[errorAtEnd]]>=     *)
 infix 4 errorAtEnd
@@ -2794,6 +2873,12 @@ datatype right_result
   = FOUND_RIGHT      of bracket_shape located
   | SCANNED_TO_RIGHT of srcloc  (* location where scanning started *)
   | NO_RIGHT
+(* In this book, round and square brackets are  *)
+(* interchangeable, but curly brackets are special. *)
+(* Predicate [[notCurly]] identifies those non-curly, *)
+(* interchangeable bracket shapes. Parser [[leftCurly]] *)
+(* is just like [[left]], except it recognizes only *)
+(* curly left brackets.                         *)
 (* <boxed values 230>=                          *)
 val _ = op notCurly  : bracket_shape located -> bool
 val _ = op leftCurly : ('t plus_brackets, bracket_shape located) polyparser
@@ -2871,13 +2956,6 @@ fun matchBrackets _ (loc, left) a (FOUND_RIGHT (loc', right)) =
       synerrorAt ("unmatched " ^ leftString left) loc
   | matchBrackets e (loc, left) _ (SCANNED_TO_RIGHT loc') =
       synerrorAt ("expected " ^ e) loc
-(* The right-bracket result is used in function *)
-(* [[matchBrackets]], which looks for a right bracket *)
-(* after a thing is matched. Function [[matchBrackets]] *)
-(* does look at shapes: if the right bracket is *)
-(* immediately present ([[FOUND_RIGHT]]) and is of the *)
-(* proper shape, then the match succeeds. Otherwise, *)
-(* it produces a suitable error. \nwverynarrowboxes *)
 (* <boxed values 232>=                          *)
 val _ = op matchBrackets : string -> bracket_shape located -> 'a -> right_result
                                                                      -> 'a error
@@ -3038,12 +3116,6 @@ fun wrapAround tokenString what p tokens =
         ( app eprint ["Search for ", what, " raised ", exnName e, "\n"]
         ; raise e
         )
-(* What if a parser doesn't cause an error, but it fails *)
-(* when you were expecting it to succeed? Try applying *)
-(* [[wrapAround]] to it; using [[wrapAround]] with a *)
-(* parser [[p]] shows what [[p]] was looking for, what *)
-(* tokens it was looking at, and whether it found *)
-(* something. \nwverynarrowboxes                *)
 (* <boxed values 239>=                          *)
 val _ = op wrapAround : ('t -> string) -> string -> ('t, 'a) polyparser -> ('t,
                                                                   'a) polyparser
@@ -3121,12 +3193,6 @@ fun parseWithErrors parser =
         | adjust other = other
   in  streamOfUnfold (adjust o parser)
   end
-(* When an error occurs during parsing, I want the *)
-(* parser to drain the rest of the tokens on the line *)
-(* where the error occurred. And errors aren't stripped *)
-(* yet; errors are passed on to the interactive stream *)
-(* because when an error is detected, the prompt may *)
-(* need to be changed.                          *)
 (* <boxed values 243>=                          *)
 val _ = op parseWithErrors : ('t, 'a) polyparser ->                     't
                                     located eol_marked stream -> 'a error stream
@@ -3252,6 +3318,23 @@ fun ('t, 'a) finiteStreamOfLine fail (lexer, parser) line =
 val _ = finiteStreamOfLine :
           (unit -> string option) -> 't lexer * ('t, 'a) polyparser -> line ->
                                                                        'a stream
+(* \qbreak                                      *)
+(*                                              *)
+(* Interpreter setup and command-line \         *)
+(* chaptocsplitprocessing                       *)
+(*                                              *)
+(* In each interpreter, something has to act like the *)
+(* C function [[main]]. This code has to initialize the *)
+(* interpreter and start evaluating extended    *)
+(* definitions.                                 *)
+(*                                              *)
+(* Part of initialization is setting the global error *)
+(* format. The reusable function [[setup_error_format]] *)
+(* uses interactivity to set the error format, which, as *)
+(* in the C versions, determines whether syntax-error *)
+(* messages include source-code locations (see functions *)
+(* [[synerrorAt]] and [[synerrormsg]] on \      *)
+(* cpagerefmlinterps.synerrormsg,mlinterps.synerrorAt). *)
 (* <shared utility functions for initializing interpreters>= *)
 fun override_if_testing () =                           (*OMIT*)
   if isSome (OS.Process.getEnv "NOERRORLOC") then      (*OMIT*)
@@ -3265,6 +3348,22 @@ fun setup_error_format interactivity =
   else
     toplevel_error_format := WITH_LOCATIONS
     before override_if_testing () (*OMIT*)
+(* \qbreak                                      *)
+(*                                              *)
+(* Utility functions for limiting computation   *)
+(*                                              *)
+(* Each interpreter is supplied with two ways of *)
+(* stopping a runaway computation:              *)
+(*                                              *)
+(*   • A recursion limit halts the computation if its *)
+(*  call stack gets deeper than 6,000 calls.    *)
+(*   • A supply of evaluation fuel halts the computation *)
+(*  after a million calls to [[eval]]. That's enough *)
+(*  to compute the 25th Catalan number in uSmalltalk, *)
+(*  for example.                                *)
+(*                                              *)
+(* If environment variable [[BPCOPTIONS]] includes the *)
+(* string [[nothrottle]], evaluation fuel is ignored. *)
 (* <function application with overflow checking>= *)
 local
   val defaultRecursionLimit = 6000
@@ -3316,6 +3415,9 @@ end
 (*                                                               *)
 (*****************************************************************)
 
+(* Most of uML's type components are shared with \nml or *)
+(* with micro-Haskell (which didn't make the cut for the *)
+(* book).                                       *)
 (* <Hindley-Milner types with generated type constructors>= *)
 (* The syntactic sugar completes what you need to know *)
 (* in order to program effectively using algebraic data *)
@@ -3518,21 +3620,6 @@ in
         else t ^ "@{" ^ Int.toString (n+1) ^ "}"
     end
 end
-(* \qtrim1 To choose the [[printName]] of a type *)
-(* constructor, I could just use the name in the type *)
-(* constructor's definition. But if a constructor is *)
-(* redefined, you don't want an error message like *)
-(* ``cannot make [[node]] equal to [[node]]'' or *)
-(* ``expected struct point but argument is of type *)
-(* struct point.'' [The second message is from \texttt *)
-(* {gcc}.] We can do better. I define a function *)
-(* [[freshPrintName]] which, when given the name of a *)
-(* type constructor, returns a [[printName]] that is *)
-(* distinct from prior [[printName]]s. \qbreak  *)
-(* For example, the first time I define [[node]], it *)
-(* prints as [[node]]. But the second time I define *)
-(* [[node]], it prints as [[node@2]], and so on. \ *)
-(* umlflabelfreshTycon                          *)
 (* <boxed values 161>=                          *)
 val _ = op freshPrintName : string -> string
 (* [[funty]] stand for \tau, [[actualtypes]]    *)
@@ -3553,6 +3640,217 @@ in
 end
 (* <boxed values 162>=                          *)
 val _ = op freshTycon : name -> tycon
+(* Only one thing is different: the representation of *)
+(* closures.                                    *)
+(*                                              *)
+(* A closure includes an environment, and if the closure *)
+(* represents a recursive function, the closure's *)
+(* environment includes a reference to the closure *)
+(* itself. Such self-reference is implemented using *)
+(* mutation. In micro-Scheme, the environment maps every *)
+(* name to a mutable reference cell. Recursion is *)
+(* implemented by first putting an unspecified value in *)
+(* the function's cell, then updating the cell once the *)
+(* closure is created. In \nml, an environment maps each *)
+(* name to a value—the mutable cell is part of the *)
+(* closure, not the environment. Recursion is   *)
+(* implemented by first putting an unspecified  *)
+(* environment in the closure's cell, then building a *)
+(* new environment, and finally updating the cell to *)
+(* hold that environment. Therefore the closure stores a *)
+(* \monoboxvalue env ref, not a \monoboxvalue ref env as *)
+(* in micro-Scheme.                             *)
+(*                                              *)
+(* Operational semantics                        *)
+(*                                              *)
+(* Because \nml doesn't have mutation and because the *)
+(* effects of its imperative primitives aren't specified *)
+(* formally, its operational semantics is simple. *)
+(* Its abstract machine has no locations and no store; *)
+(* evaluating an expression just produces a value. The *)
+(* judgment is \nmlevale ==>\nmlevalrv. \jlabel *)
+(* nml.eval.exp\nmlevale ==>\nmlevalrv The environment *)
+(* rho maps a name to a value, not to a mutable location *)
+(* as in micro-Scheme. And evaluating a definition *)
+(* produces a new environment; the form of that judgment *)
+(* is \nmlevald -->rho'. \jlabelnml.eval.def\nmlevald *)
+(* -->rho'                                      *)
+(*                                              *)
+(* Rules for expressions                        *)
+(*                                              *)
+(* Most of the rules should be self-explanatory. \ops *)
+(* Literal \nmleval\xliteral(v) ==>\nmlevalrv   *)
+(*                                              *)
+(* \ops Var x in dom rho \nmleval\var(x) ==>\nmlevalrrho *)
+(* (x)                                          *)
+(*                                              *)
+(* \ops IfTrue \nmlevale_1 ==>\nmlevalrv_1 \andalso v_1 *)
+(* \neq\vfalse\andalso\nmlevale_2 ==>\nmlevalrv_2 \ *)
+(* nmleval\xif(e_1, e_2, e_3) ==>\nmlevalrv_2   *)
+(*                                              *)
+(* \ops IfFalse \nmlevale_1 ==>\nmlevalrv_1 \andalsov_1 *)
+(* = \vfalse\andalso\nmlevale_3 ==>\nmlevalrv_3 \nmleval *)
+(* \xif(e_1, e_2, e_3) ==>\nmlevalrv_3          *)
+(*                                              *)
+(* The rules for \xbegin are a cheat; the purpose of \ *)
+(* xbegin is to force order of evaluation, but these *)
+(* rules are so simplified that they don't enforce an *)
+(* order of evaluation. \ops EmptyBegin \nmleval\xbegin *)
+(* () ==>\nmlevalr\vnil \ops Begin \fourquad \nmlevale_1 *)
+(* ==>\nmlevalrv_1 \nmlevale_2 ==>\nmlevalrv_2 ... \ *)
+(* nmlevale_n ==>\nmlevalrv_n \nmleval\xbegin(e_1, e_2, *)
+(* ..., e_n) ==>\nmlevalrv_n                    *)
+(*                                              *)
+(* Just as in micro-Scheme, \xlambda captures an *)
+(* environment in a closure, and \xapply uses the *)
+(* captured environment. Because \nml does not store *)
+(* actual parameters in mutable locations, its rules are *)
+(* simpler than micro-Scheme's rules. \ops MkClosure \ *)
+(* nmleval\xlambda(<x_1, ..., x_n>, e) ==> \nmlevalr\ *)
+(* xclo\xlambda(<x_1, ..., x_n>, e)rho \ops ApplyClosure *)
+(* \threeline \nmlevale ==>\xclo\xlambda(<x_1, ..., *)
+(* x_n>, e_c)rho_c \repeati\nmlevale_i ==>\nmlevalrv_i *)
+(* <e_c, rho_c{x_1|->v_1, ..., x_n|->v_n}> ==>\nmlevalrv *)
+(* \nmleval\apply(e, e_1, ..., e_n) ==>\nmlevalrv *)
+(*                                              *)
+(* The semantic rule for applying a \nml primitive is to *)
+(* apply the function attached to that primitive. The *)
+(* implementation is equally simple. \ops ApplyPrimitive *)
+(* \threeline \nmlevale ==>\lprimitive(f) \repeati\ *)
+(* nmlevale_i ==>\nmlevalrv_i f(v_1, ..., v_n) = v \ *)
+(* nmleval\apply(e, e_1, ..., e_n) ==>v         *)
+(*                                              *)
+(* Because a \xlet-bound name stands for a value, not a *)
+(* location, rules for \xlet forms are also simplified. *)
+(* \ops Let \twoline \repeati\nmlevale_i ==>\nmlevalrv_i *)
+(* \nmleval[{x_1|->v_1, ..., x_n|->v_n}] e ==>\nmlevalrv *)
+(* \nmleval\xlet(<x_1,e_1,...,x_n,e_n>, e) ==>\nmlevalrv *)
+(*                                              *)
+(* As in micro-Scheme, a \xletstar expression requires a *)
+(* sequence of environments. \ops Letstar \fourline \ *)
+(* nmleval[_0]e_1 ==>v_1 \andalsorho_1 = rho_0{x_1|-> *)
+(* v_1} to 0pt... \nmleval[_n-1] e ==>v_n \andalsorho_n *)
+(* = rho_n-1{x_n|->v_n} to 0pt\nmleval[_n] e ==>\ *)
+(* nmlevalrv \nmleval[_0]\xletstar              *)
+(* (<x_1,e_1,...,x_n,e_n>, e) ==>\nmlevalrv     *)
+(*                                              *)
+(* \xletrec is the tricky one. The expressions are *)
+(* evaluated in an environment rho' in which their names *)
+(* are already bound to the resulting values. In other *)
+(* words, to evaluate each e_i, we have to have rho', *)
+(* but to build rho', we have to know all the v_i's. *)
+(* It seems like it should be impossible to make *)
+(* progress, but because the expressions are all *)
+(* [[lambda]] abstractions, we can pull it off. \ops *)
+(* Letrec \threeline rho' = rho{x_1|->v_1, ..., x_n|-> *)
+(* v_n} \nmleval[']e_1 ==>v_1 \qquad...\qquad \nmleval *)
+(* [']e_n ==>v_n \nmleval[']e ==>v \nmleval\xletrec *)
+(* (<x_1,e_1,...,x_n,e_n>, e) ==>\nmlevalrv Because each *)
+(* e_i is a \xlambda, evaluating it is going to produce *)
+(* a closure that captures rho' and the body of the \ *)
+(* xlambda. And in [[eval]], that makes it possible to *)
+(* build rho' without calling [[eval]] recursively (\ *)
+(* chunkrefml.chunk.eval-letrec). The resulting rho' *)
+(* satisfies the equations in the premises, and the *)
+(* implementation closes the loop by stuffing rho' into *)
+(* the mutable cell contained in each closure.  *)
+(*                                              *)
+(* Rules for evaluating definitions             *)
+(*                                              *)
+(* In micro-Scheme or Typed uScheme, evaluating a *)
+(* definition produces a new environment and a new *)
+(* store. In \nml, because there is no mutation, *)
+(* evaluating a definition produces only a new  *)
+(* environment. (It may also print.) The judgment has *)
+(* the form \nomathbreak\mltopld -->rho'.       *)
+(*                                              *)
+(* \Nml's definitions differ from micro-Scheme's in *)
+(* several significant ways:                    *)
+(*                                              *)
+(*   • In \nml, as in full ML and in Typed uScheme, a \ *)
+(*  xval definition never mutates a previous binding; *)
+(*  it always adds a new binding. (See \exrefpage *)
+(*  scheme.ex.val-new-binding of Chapter [->].) *)
+(*  If the old binding was used to create a function *)
+(*  or other value, that function still refers to the *)
+(*  old binding, not the new one. In an interactive *)
+(*  interpreter, this behavior can be baffling, *)
+(*  particularly if you load a new definition of an *)
+(*  old function but you don't also load the    *)
+(*  definitions of the functions that depend on it. \ *)
+(*  ops Val \nmlevale ==>\nmlevalrv \mltopl\xval(x, *)
+(*  e) -->rho{x |->v}                           *)
+(*                                              *)
+(*   • Like Typed uScheme but unlike micro-Scheme, \nml *)
+(*  has \xvalrec. The semantics requires a rho' that *)
+(*  binds f to a closure containing rho'. \ops ValRec *)
+(*  [*] rho' = rho{f |->\xclo\xlambda(<x_1, ..., *)
+(*  x_n>, e)rho'} \mltopl\xvalrec(f, \xlambda(<x_1, *)
+(*  ..., x_n>, e)) -->rho' This self-reference is *)
+(*  implemented using the same mutable-cell trick *)
+(*  used to implement \xletrec.                 *)
+(*                                              *)
+(*   • In \nml, as in Typed uScheme, \xdefine(f, a, e) *)
+(*  is syntactic sugar for \xvalrec(f, \xlambda(a, *)
+(*  e)). \ops Define [*] \mltopl\xvalrec(f, \xlambda *)
+(*  (<x_1, ..., x_n>, e)) -->rho' \mltopl\define(f, *)
+(*  <x_1, ..., x_n>, e) -->rho'                 *)
+(*                                              *)
+(* As in micro-Scheme, a top-level expression e is *)
+(* syntactic sugar for a binding to [[it]]. \ops Exp \ *)
+(* mltopl\xval(it, e) -->rho' \mltopl\xexp(e) -->rho' *)
+(*                                              *)
+(* Type system \chapheadsplitfor \nml           *)
+(*                                              *)
+(* [*] Like other type systems, the type system of \nml *)
+(* determines which terms have types, which in turn *)
+(* determines what definitions are accepted by the *)
+(* interpreter. As before, the types of terms are *)
+(* specified by a formal proof system. The system uses *)
+(* the same elements as the type system of Typed *)
+(* uScheme*.                                    *)
+(*                                              *)
+(* \qtrim0.5                                    *)
+(*                                              *)
+(* Types, type schemes, and type environments   *)
+(*                                              *)
+(* As in Typed uScheme, types are built using four *)
+(* elements:                                    *)
+(*                                              *)
+(*  \tightlist                                  *)
+(*   • Type variables, which are written using alpha *)
+(*   • Type constructors, which are written generically *)
+(*  using \tycon or specifically using a name such as *)
+(*  int or list                                 *)
+(*   • Constructor application, which is written using *)
+(*  ML notation (\ldotsntau) tau                *)
+(*   • Quantification, which is written using \/ *)
+(*                                              *)
+(* In \nml, unlike in Typed uScheme, quantified types *)
+(* are restricted: a type quantified with \/ may appear *)
+(* only at top level, never as an argument to a type *)
+(* constructor. In \nml, this restriction is built in to *)
+(* the syntax of types:                         *)
+(*                                              *)
+(*   • A type built with type variables, type *)
+(*  constructors, and constructor application is *)
+(*  written using the metavariable tau. {production} *)
+(*  t@tau \alternate*alpha | \tycon | (tau_1, ...,  *)
+(*  tau_n) tau {production} A tau is called a type. *)
+(*   • A quantified type is written using the *)
+(*  metavariable sigma.\notation[sigma]sigmaa type *)
+(*  scheme {production}s@sigma \/\ldotsnalpha\alldot *)
+(*  tau {production} A sigma is called a type scheme. *)
+(*                                              *)
+(* In the code, a tau is represented by a [[ty]] and a *)
+(* sigma by a [[type_scheme]]: [\Nml's representation *)
+(* has only four of the five forms found in \tuscheme. *)
+(* The fifth form, [[FUNTY]], is represented in \nml\ as *)
+(* a nested application of type constructors    *)
+(* [[function]] and [[arguments]] (chunk~\subpageref *)
+(* {ml.chunk.funtype}). Coding function types in this *)
+(* way simplifies type inference. ] [*] \nmllabel *)
+(* tyvar,ty,type_scheme                         *)
 (* <representation of Hindley-Milner types>=    *)
 type tyvar  = name
 datatype ty = TYVAR  of tyvar               (* type variable alpha *)
@@ -3567,6 +3865,107 @@ fun freetyvars t =
         | f (CONAPP (ty, tys), ftvs) = foldl f (f (ty, ftvs)) tys
   in  reverse (f (t, emptyset))
   end  
+(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
+(* \newskip\myskip \myskip=6pt                  *)
+(*                                              *)
+(*    Type system    Concept       Interpreter  *)
+(*         d         Definition    def (\cpagerefml.type.def) *)
+(*         e         Expression    \nmltypeexp  *)
+(*         x         Variable      \mlstypename *)
+(*  [\myskip] alpha  Type variable \nmltypetyvar *)
+(*        tau        Type          \nmltypety   *)
+(*  sigma, \/alpha.  Type scheme   [[type_scheme]] \nmltypepage *)
+(*        tau                      type_scheme  *)
+(*  [\myskip] tau=== Type          \monoboxeqType(tau, tau') \ *)
+(*        tau'       equivalence   nmlfunpageeqType *)
+(*  [\myskip] Gamma  Type          [[type_env]] \nmltypepage *)
+(*                   environment   type_env     *)
+(*  Gamma(x) = sigma Type lookup   \monofindtyscheme(x, Gamma) =  *)
+(*                                 sigma \nmlfunpagefindtyscheme *)
+(*  Gamma{x |->sigma Type binding  \monobindtyscheme(x, sigma, *)
+(*         }                       Gamma) \nmlfunpagebindtyscheme *)
+(*   [\myskip] \tyc  Constraint    \nmltypecon  *)
+(*  tau_1 \eqtytau_2 Equality      tau_1 [[ ]] tau_2 \nmlfunpage *)
+(*                   constraint    tilde        *)
+(*  \tyc_1 \land\tyc Conjunction   \tyc_1 [[/] \tyc_2 \nmlfunpage *)
+(*         _2                      cand         *)
+(*       \trivc      Trivial       \nmlfunTRIVIAL *)
+(*                   constraint                 *)
+(*     \bigwedge\    Conjunction   \monoconjoinConstraints [\ *)
+(*  nolimits_i \tyc                ldotsn\tyc] \nmlfunpage *)
+(*         _i                      conjoinConstraints *)
+(*  [\myskip] \ftv(  Free type     freetyvars tau \nmlfunpage *)
+(*        tau)       variables     freetyvars   *)
+(*    \ftv(Gamma)    Free type     freetyvarsGamma Gamma \ *)
+(*                   variables     nmlfunpagefreetyvarsGamma *)
+(*     \ftv(\tyc)    Free type     freetyvarsConstraint \tyc \ *)
+(*                   variables     nmlfunpagefreetyvarsConstraint *)
+(*                   Type          \monoboxtypeof(e, Gamma) = ( *)
+(*    [\myskip] \    inference     tau, \tyc), also \monoboxty e *)
+(*  typeisc\tyce tau               = (tau, \tyc) (\cpageref *)
+(*                                 ml.fun.typeof; some parts left *)
+(*                                 as an exercise) *)
+(*   \nmltoptd -->   Type          \monoboxtypdef(d, Gamma) = \ *)
+(*       Gamma'      inference     monobox(Gamma', s) \nmlfunpage *)
+(*                                 typdef       *)
+(*  [\myskip] \subsn A             \nmltypesubst *)
+(*                   substitution               *)
+(*      \idsubst     Identity      \nmlfunidsubst *)
+(*                   substitution               *)
+(*   [alpha|->tau]   Substitution  \monoalpha |–> tau \nmlfunpage *)
+(*                   for alpha     |–>        *)
+(*     \subsntau     Substitution  \monotysubst \subsn tau \ *)
+(*                                 nmlfunpagetysubst *)
+(*    \subsnalpha    Substitution  \monovarsubst \subsn alpha \ *)
+(*                                 nmlfunpagetysubst *)
+(*     \subsn\tyc    Substitution  \monoconsubst \subsn \tyc \ *)
+(*                                 nmlfunpageconsubst *)
+(*  \subsn_2 o\subsn Composition   \nmlfuncompose *)
+(*         _1                                   *)
+(*     dom \subsn    Domain        \nmlfundom   *)
+(*  [\myskip] \subsn Constraint    \subsn= \monoboxsolve \tyc *)
+(*   \tyc===\trivc\  solving       (left as an exercise, \ *)
+(*    notation===                  cpagerefml.fun.solve) *)
+(*   equivalence of                             *)
+(*    constraints                               *)
+(*   \tyc===\trivc   Solved        \monoisSolved \tyc \nmlfunpage *)
+(*                   constraint    isSolved     *)
+(*     [\myskip]     Instantiation \monoboxinstantiate(\/alpha. *)
+(*                                 tau, [tau']) \nmlfunpage *)
+(*      \centering \               instantiate  *)
+(*       /alpha.tau                             *)
+(*      becomes tau[                            *)
+(*      alpha|->tau                             *)
+(*           ']                                 *)
+(*                                              *)
+(*     [\myskip]     Base types    [[inttype]], [[booltype]], ... *)
+(*      [[int]],                   \nmlfunpageinttype *)
+(*   [[bool]], ...                              *)
+(*   \crossdotsntau  Function type \monoboxfuntype([\ldotsntau], *)
+(*       -->tau                    tau) \nmlfunpagefuntype *)
+(*                                              *)
+(* Correspondence between \nml's type system and code  *)
+(* [*]                                          *)
+(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
+(*                                              *)
+(* The interpreter                              *)
+(*                                              *)
+(* [*] In most respects, the interpreter for \nml is the *)
+(* interpreter for micro-Scheme (\crefmlscheme.chap), *)
+(* plus type inference. Significant parts of type *)
+(* inference don't appear here, however, because they *)
+(* are meant to be exercises.                   *)
+(*                                              *)
+(* Functions on types and type schemes          *)
+(*                                              *)
+(* This section defines functions that are used *)
+(* throughout type inference.                   *)
+(*                                              *)
+(* Function [[freetyvars]] returns a set containing the *)
+(* free type variables of a type. For readability, *)
+(* it builds the set so type variables appear in the *)
+(* order of their first appearance in the type, when *)
+(* reading from left to right. \nmlflabelfreetyvars *)
 (* <boxed values 74>=                           *)
 val _ = op freetyvars : ty -> name set
 (* [[funty]] stand for \tau, [[actualtypes]]    *)
@@ -3631,10 +4030,6 @@ fun asFuntype (CONAPP (TYCON mu, [CONAPP (_, args), result])) =
 (* <boxed values 155>=                          *)
 val _ = op funtype   : ty list * ty -> ty
 val _ = op asFuntype : ty -> (ty list * ty) option
-(* String conversion                            *)
-(*                                              *)
-(* Function types are printed infix, and other  *)
-(* constructor applications are printed prefix. *)
 (* <definition of [[typeString]] for Hindley-Milner types>= *)
 fun typeString tau =
   case asFuntype tau
@@ -3775,6 +4170,18 @@ fun tysubst theta =
   let fun subst (TYVAR a) = varsubst theta a
         | subst (TYCON c) = TYCON c
         | subst (CONAPP (tau, taus)) = CONAPP (subst tau, map subst taus)
+(* As the code shows, the function defined by a *)
+(* substitution is total. If type variable [[a]] is not *)
+(* in the domain of [[theta]], then \monoboxvarsubst *)
+(* theta leaves [[a]] unchanged.                *)
+(*                                              *)
+(* A substitution is most often interpreted as a *)
+(* function from types to types. That interpretation is *)
+(* provided by function [[tysubst]]. It is almost the *)
+(* same as the [[tysubst]] function in the interpreter *)
+(* for Typed uScheme (\cpagereftuscheme.code.tysubst), *)
+(* but because it has no quantified types to deal with, *)
+(* it is simpler. \nmlflabeltysubst [*]         *)
 (* <boxed values 68>=                           *)
 val _ = op tysubst : subst -> (ty -> ty)
 val _ = op subst   :           ty -> ty
@@ -3825,20 +4232,15 @@ fun instantiate (FORALL (formals, tau), actuals) =
   tysubst (mkEnv (formals, actuals)) tau
   handle BindListLength =>
     raise BugInTypeInference "number of types in instantiation"
-(* Function [[testIsGood]], which can be shared among *)
-(* languages that share the same definition of  *)
-(* [[unit_test]], says whether a test passes (or in a *)
-(* typed language, whether the test is well-typed and *)
-(* passes). Function [[testIsGood]] has a slightly *)
-(* different interface from the corresponding C function *)
-(* [[test_result]]. The reasons are discussed in \cref *)
-(* mlschemea.chap on \cpagerefmlschemea.testIsGood. *)
-(* These pieces can be used to define a single version *)
-(* of [[processTests]] (\crefpage               *)
-(* ,mlinterps.processTests) and a single read-eval-print *)
-(* loop, each of which is shared among many bridge *)
-(* languages. The pieces are organized as follows: \ *)
-(* mdbusemlinterpsprocessTests                  *)
+(* Instantiation is as in Chapter [->], except no kind *)
+(* environment is needed. Because instantiations are *)
+(* computed by the system, instantiating a type scheme *)
+(* with the wrong number of arguments indicates an *)
+(* internal error. Such an error is signaled by raising *)
+(* the exception [[BugInTypeInference]], which is raised *)
+(* only when there is a fault in the interpreter; *)
+(* it should never be triggered by a faulty \nml *)
+(* program. [*] \nmlflabelinstantiate           *)
 (* <boxed values 70>=                           *)
 val _ = op instantiate : type_scheme * ty list -> ty
 (* <shared utility functions on Hindley-Milner types>= *)
@@ -3874,22 +4276,28 @@ fun eqType (TYVAR a, TYVAR a') = a = a'
       eqType (tau, tau') andalso eqTypes (taus, taus')
   | eqType _ = false
 and eqTypes (taus, taus') = ListPair.allEq eqType (taus, taus')
-(* The [[|–>]] function accepts any combination of alpha *)
-(*  and tau. But if alpha appears free in tau   *)
-(* (for example, if tau=listalpha), then the resulting *)
-(* substitution \subsn is not idempotent. If \subsn is *)
-(* not idempotent, then \subsno\subsn!=\subsn, and *)
-(* moreover, \subsnalpha!=\subsntau. But type inference *)
-(* is all about using substitutions to guarantee *)
-(* equality of types, and we must be sure that every *)
-(* substitution we create is idempotent, so if \subsn=( *)
-(* alpha|->tau), then \subsnalpha= \subsntau. If this *)
-(* equality does not hold, there is a bug in type *)
-(* inference (\crefml.ex.idempotence).          *)
+(* Transformers made with [[many]] and [[optional]] *)
+(* succeed even when there is no input. They also *)
+(* succeed when there is input that they don't  *)
+(* recognize.                                   *)
 (*                                              *)
-(* A final useful substitution is the identity  *)
-(* substitution, which is represented by an empty *)
-(* environment. \nmlflabelidsubst               *)
+(* Error-detecting transformers and their composition *)
+(*                                              *)
+(* Sometimes an error is detected not by a parser but by *)
+(* a function that is applied to the results of parsing. *)
+(* A classic example is a function definition: if the *)
+(* formal parameters are syntactically correct but *)
+(* contain a duplicate name, an error should be *)
+(* signaled. Formal parameters could be handled by a *)
+(* parser whose result type is \monoboxname list *)
+(* error—but every transformer type already includes the *)
+(* possibility of error! I would prefer that the *)
+(* parser's result type be just \monoboxname list, and *)
+(* that if duplicate names are detected, that the error *)
+(* be managed in the same way as a syntax error. *)
+(* To enable such management, I define [[<*>!]] and [[< *)
+(* >!]] combinators, which merge function-detected *)
+(* errors with parser-detected errors. \nwnarrowboxes *)
 (* <boxed values 72>=                           *)
 val _ = op idsubst : subst
 (* In math, the identity substitution is written \ *)
@@ -3981,6 +4389,10 @@ val _ = op generalize : ty * name set -> type_scheme
 (* <shared utility functions on Hindley-Milner types>= *)
 fun freshInstance (FORALL (bound, tau)) =
   instantiate (FORALL (bound, tau), map freshtyvar bound)
+(* The dual function, [[instantiate]], is defined in *)
+(* chunk [->]. It requires a list of types with which to *)
+(* instantiate. That list is often a list of fresh type *)
+(* variables, as provided by function [[freshInstance]]. *)
 (* <boxed values 78>=                           *)
 val _ = op freshInstance : type_scheme -> ty
 (* <shared utility functions on Hindley-Milner types>= *)
@@ -3998,23 +4410,6 @@ fun schemeShape (FORALL (alphas, tau)) =
      | SOME (args, result) =>
                if null alphas then MONO_FUN (args, result)
                else                POLY_FUN (alphas, args, result)
-(* \qtrim1                                      *)
-(*                                              *)
-(* Validation of constructor types in data definitions *)
-(*                                              *)
-(* As explained in \crefpage(adt.typing-data, every *)
-(* value constructor in a [[data]] definition must have *)
-(* a type that is compatible with the definition. *)
-(* Compatibility is defined formally by inference rules *)
-(* for the type-compatibility judgment \vconcompatsigmaµ *)
-(* \akind (\cpagerefadt.vconcompat). To implement these *)
-(* rules in a way that doesn't make my head hurt, *)
-(* I define an algebraic data type that shows the four *)
-(* possible shapes of sigma, one for each rule. \qbreak *)
-(* That way I can pattern match on them. The shapes are *)
-(* \mathbox\crossdotsntau-->tau, tau, \mathbox\/\ldotsk *)
-(* alpha. \crossdotsntau-->tau, and \mathbox\/\ldotsk *)
-(* alpha. tau.                                  *)
 (* <boxed values 163>=                          *)
 type scheme_shape = scheme_shape
 (* [[funty]] stand for \tau, [[actualtypes]]    *)
@@ -4034,19 +4429,6 @@ fun typeSchemeString (FORALL ([], tau)) =
       typeString tau
   | typeSchemeString (FORALL (a's, tau)) =
       "(forall [" ^ spaceSep a's ^ "] " ^ typeString tau ^ ")"
-(* A degenerate type scheme is printed as if it were a *)
-(* type. But when a nondegenerate polytype is printed, *)
-(* the forall is explicit, and all the quantified *)
-(* variables are shown. [It~is not strictly necessary to *)
-(* show the quantified variables, because in any *)
-(* top-level type, \emph{all} type variables are *)
-(* quantified by the~$\forall$. For this reason, *)
-(* Standard~ML leaves out quantifiers and type  *)
-(* variables. But when you're learning about parametric *)
-(* polymorphism, explicit \texttt{forall}s are better. *)
-(* In~my experience, \sml's implicit \texttt{forall}s *)
-(* make it hard to new learners to understand what's *)
-(* going~on. ]                                  *)
 (* <boxed values 276>=                          *)
 val _ = op typeString       : ty          -> string
 val _ = op typeSchemeString : type_scheme -> string
@@ -4055,89 +4437,6 @@ fun substString [] = "idsubst"
   | substString pairs =
       String.concatWith " o " 
       (map (fn (a, t) => a ^ " |--> " ^ typeString t) pairs)
-(* {sidebar}[t]Why generalize and instantiate? \ *)
-(* abovedisplayskip=0.8\abovedisplayskip \      *)
-(* abovedisplayshortskip=0.8\abovedisplayshortskip \ *)
-(* belowdisplayskip=0.8\belowdisplayskip [*] We use *)
-(* quantified types (i.e., type schemes) so we can *)
-(* instantiate them when we look them up in an  *)
-(* environment. Instantiation gives us the full effect *)
-(* of polymorphism. Without instantiation, we wouldn't *)
-(* be able to type such ML terms as \monobox(1::nil, *)
-(* true::nil). Suppose we had an environment Gamma with *)
-(* only types, not type schemes:                *)
-(*                                              *)
-(*  Gamma= { 1 : int, true : bool, nil : listalpha, *)
-(*  :: : alpha*listalpha-->listalpha}\text.     *)
-(*                                              *)
-(* When typechecking [[1::nil]], we would get the *)
-(* constraint alpha\eqtyint. And when typechecking *)
-(* [[true::nil]], we would get the constraint alpha\eqty *)
-(* bool. But the conjunction \mathboxalpha\eqtyint\land *)
-(* alpha\eqtybool has no solution, and type checking *)
-(* would fail.                                  *)
-(*                                              *)
-(* Instead, we use [[freshInstance]] to make sure that *)
-(* every use of a polymorphic value (here [[::]] and *)
-(* [[nil]]) has a type different from any other *)
-(* instance. In order to make that work, the environment *)
-(* has to contain polytypes:                    *)
-(*                                              *)
-(*  Gamma= { 1 : \/.int, true : \/.bool, nil : \/ *)
-(*  alpha\alldotlistalpha, :: : \/alpha\alldotalpha *)
-(*  *listalpha-->listalpha}\text.               *)
-(*                                              *)
-(* Now, we can imagine our sample term like this, *)
-(* writing [[::]] as a \csname@minipagefalse\endcsname \ *)
-(* topsep=0pt \partopsep=0pt prefix operator so as to *)
-(* show the types: {smallverbatimx} (op :: : 't121 * *)
-(* 't121 list -> 't121 list (1 : int, nil : 't122 list), *)
-(* op :: : 't123 * 't123 list -> 't123 list (true : *)
-(* bool, nil : 't124 list)) {smallverbatimx} The *)
-(* constraint [['t121]] \eqtyint\land int\eqty[['t122]]  *)
-(* \land [['t123]] \eqtybool \land bool\eqty[['t124]]  *)
-(* does have a solution, and the whole term has the type *)
-(* \monoboxint list * bool list, as desired. {sidebar} *)
-(*                                              *)
-(* Type environments                            *)
-(*                                              *)
-(* Function [[generalize]] is called with the free type *)
-(* variables of some type environment. And a type *)
-(* environment contains the type of every defined name, *)
-(* so it can get big. To reduce the cost of searching a *)
-(* large environment for free type variables, a type *)
-(* environment is represented in a way that enables the *)
-(* type checker to find free type variables in constant *)
-(* time.                                        *)
-(*                                              *)
-(* A representation of type environments must support *)
-(* these functions:                             *)
-(*                                              *)
-(*   • Function [[bindtyscheme]] adds a binding x :  *)
-(*  sigma to the environment Gamma. It is used to *)
-(*  implement the \rulenameLambda rule and the  *)
-(*  various \xlet rules.                        *)
-(*                                              *)
-(*   • Function [[findtyscheme]] looks up a variable x *)
-(*  to find sigma such that Gamma(x) = sigma. It is *)
-(*  used to implement the \rulenameVar rule.    *)
-(*                                              *)
-(*   • Function [[freetyvarsGamma]] finds the type *)
-(*  variables free in Gamma, i.e., the type variables *)
-(*  free in any sigma in Gamma. It is used to get a *)
-(*  set of free type variables to use in        *)
-(*  [[generalize]]; when a type scheme is assigned to *)
-(*  a let-bound variable, only those type variables *)
-(*  not free in Gamma may be \/-bound.          *)
-(*                                              *)
-(* If [[freetyvarsGamma]] used a representation of type *)
-(* \monobox[[type_scheme]] env, it would visit every *)
-(* type scheme in every binding in the environment. *)
-(* Because most bindings contribute no free type *)
-(* variables, most visits would be unnecessary. Instead, *)
-(* all functions use a representation that includes a *)
-(* cache of the type environment's free type variables. *)
-(* \nmllabeltype_env                            *)
 (* <specialized environments for type schemes>= *)
 type type_env = type_scheme env * name set
 (* <specialized environments for type schemes>= *)
@@ -4193,50 +4492,9 @@ fun asExistential (FORALL (alphas_and_betas, tau)) =
              end
          | NONE => NONE
   end
-(* \qbreak                                      *)
-(*                                              *)
-(* Support for existential types                *)
-(*                                              *)
-(* [*] As described in \crefadtx.chap, uML can be *)
-(* extended with support for existential types. *)
-(* That extension is implemented here.          *)
-(*                                              *)
-(* First, function asX converts a type scheme to an *)
-(* existential type scheme. For the simple case of one *)
-(* universally quantified and one existentially *)
-(* quantified type variable, the specification looks *)
-(* like this (\crefadtx.chap):                  *)
-(*                                              *)
-(*  \asXequation                                *)
-(*                                              *)
-(* As implied by the left-hand side, only a function *)
-(* type can successfully be converted to an existential *)
-(* type.                                        *)
-(*                                              *)
-(* In general, a converted function type may have any *)
-(* number of universally quantified type variables \ *)
-(* ldotsnalpha, and likewise any number of existentially *)
-(* quantified type variables \ldotsmbeta. The type is *)
-(* converted by looking at the result type, which must *)
-(* take the form of a type constructor applied to type *)
-(* variables \ldotsnalpha. In the converted type, those *)
-(* type variables are universally quantified. Whatever *)
-(* other type variables were quantified in the original *)
-(* [[FORALL]] are the \ldotsmbeta, and they become *)
-(* existentially quantified.                    *)
 (* <boxed values 169>=                          *)
 type x_type_scheme = x_type_scheme
 val _ = op asExistential : type_scheme -> x_type_scheme option
-(* An existential type is skolemized with fresh skolem *)
-(* types. A skolem type is represented as a type *)
-(* constructor, but unlike a normal type constructor, it *)
-(* has an odd number as its identity. (If I were *)
-(* starting an implementation from scratch, I would *)
-(* prefer to add [[SKOLEM_TYPE]] to the representation *)
-(* of [[ty]], \qbreak but I want to reuse the   *)
-(* constraint-solving and type-inference code left over *)
-(* from \nml, and I prefer a representation that permits *)
-(* me to reuse that code.)                      *)
 (* <extensions that support existential types>= *)
 fun freshSkolem _ =
   let val { identity = id, printName = T } = freshTycon "skolem type"
@@ -4266,9 +4524,6 @@ fun typeSchemesFreeSkolems sigmas =
 (* [[foldl]] and an empty set.                  *)
 (* <boxed values 170>=                          *)
 val _ = op addFreeSkolems : ty * tycon set -> tycon set
-(* Function [[addFreeSkolems]] can be used to find free *)
-(* skolem types in a type, in a set of types, or in a *)
-(* list of type schemes.                        *)
 (* <boxed values 170>=                          *)
 val _ = op typeFreeSkolems  : ty     -> tycon set
 val _ = op typesFreeSkolems : ty set -> tycon set
@@ -4304,10 +4559,12 @@ and eqKinds (ks, ks') = ListPair.allEq eqKind (ks, ks')
 fun kindString TYPE = "*"
   | kindString (ARROW (ks, k)) =
       "(" ^ spaceSep (map kindString ks @ ["=>", kindString k]) ^ ")"
-(* [*] \qtrim1                                  *)
-(*                                              *)
-(* The syntax of a type expression is represented as an *)
-(* ML value of type [[tyex]].                   *)
+(* Different interpreters need different utility *)
+(* functions, but they all need an implementation of *)
+(* equality that can be used in [[check-expect]]. And *)
+(* the micro-Scheme interpreter also needs an   *)
+(* implementation of primitive equality. Primitive *)
+(* equality permits only atoms to be considered equal. *)
 (* <definition of [[tyex]] for \uml>=           *)
 datatype tyex 
   = TYNAME  of name                (* names type or type constructor *)
@@ -4322,15 +4579,20 @@ type vcon = name   (* a value constructor *)  (*OMIT*)
 datatype pat = WILDCARD
              | PVAR     of name
              | CONPAT   of vcon * pat list
-(* \umllabelexp                                 *)
 (* <definitions of [[exp]] and [[value]] for \uml>= *)
 type vcon = name   (* a value constructor *)
 datatype exp 
   = VCONX of vcon
   | CASE  of exp * (pat * exp) list
-  | (* \qbreak The syntactic forms that are unique to uML *)
-    (* are shown in \crefadt.chap. The remaining forms, *)
-    (* which are carried over form \nml, are defined here. *)
+  | (* The extended-definition forms [[USE]] and [[TEST]] *)
+    (* are implemented in exactly the same way for every *)
+    (* language: internal function [[try]] passes each *)
+    (* [[USE]] to [[useFile]], and it adds each [[TEST]] to *)
+    (* the mutable list [[unitTests]]—just as in the C code *)
+    (* in \crefpage(impcore.readevalprint. Function [[try]] *)
+    (* passes each true definition [[DEF]] to function *)
+    (* [[processDef]], which does the language-dependent *)
+    (* work.                                        *)
     (* <forms of [[exp]] carried over from \nml>=   *)
         LITERAL    of value
       | VAR        of name
@@ -4358,6 +4620,8 @@ datatype def = DATA of data_def
                | EXP    of exp
                | DEFINE of name * (name list * exp)
   withtype data_def = name * kind * (vcon * tyex) list
+(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
+(* \umllabeldef                                 *)
 (* <boxed values 143>=                          *)
 type data_def = data_def
 (* Syntactic sugar for implicit-data            *)
@@ -4381,9 +4645,6 @@ datatype unit_test = CHECK_EXPECT      of exp * exp
                    | CHECK_TYPE        of exp * tyex
                    | CHECK_PTYPE       of exp * tyex
                    | CHECK_TYPE_ERROR  of def
-(* And these forms of extended definition are used by *)
-(* all languages in \crefrangemlscheme.chapsmall.chap.  *)
-(* [*][*]                                       *)
 (* <definition of [[xdef]] (shared)>=           *)
 datatype xdef = DEF    of def
               | USE    of name
@@ -4432,9 +4693,6 @@ val _ = op typeEnvSubst : subst -> type_scheme env -> type_scheme env
 val _ = op valueString : value -> string
 (* CLOSING IN ON CHECK-PRINT:                   *)
 
-(* \qbreak Patterns are new with uML, but a pattern is *)
-(* rendered in the same way as the corresponding *)
-(* expression.                                  *)
 (* <definition of [[patString]] for \uml\ and \uhaskell ((uml))>= *)
 fun patString WILDCARD    = "_"
   | patString (PVAR x)    = x
@@ -4516,13 +4774,6 @@ fun tyexString (TYNAME t) = t
 (*                                                               *)
 (*****************************************************************)
 
-(* Type predicate for value constructors        *)
-(*                                              *)
-(* During the evaluation of a data definition, function *)
-(* [[isPolymorphicFuntyex]] is used to determine whether *)
-(* a value constructor is represented as a constructed *)
-(* value or as a function that returns a constructed *)
-(* value (\cpagerefadt.fun.evalDataDef).        *)
 (* <utility functions on \uml\ syntax>=         *)
 fun isPolymorphicFuntyex (FORALLX (_, tau)) = isPolymorphicFuntyex tau
   | isPolymorphicFuntyex (FUNTYX _)         = true
@@ -4535,20 +4786,6 @@ fun isPolymorphicFuntyex (FORALLX (_, tau)) = isPolymorphicFuntyex tau
 (*                                                               *)
 (*****************************************************************)
 
-(* uML's primitive values are also \nml primitive *)
-(* values, and they are defined in chunk [[<<primitives *)
-(* for \nml and uML [[::]]>>]], which is defined in \ *)
-(* crefml.chap and \crefmla.chap. The code defined there *)
-(* is reused, but because uML uses [[CONVAL]] instead of *)
-(* [[BOOLV]], [[PAIR]], and [[NIL]], uML needs new *)
-(* versions of some of the ML functions on which the *)
-(* primitives are built.                        *)
-(*                                              *)
-(* The first new function uML needs is the one that *)
-(* defines primitive equality. In uML, polymorphic *)
-(* equality uses the same rules as in full ML;  *)
-(* in particular, identical value constructors applied *)
-(* to equal values are considered equal.        *)
 (* <utility functions on \uml\ values ((uml))>= *)
 fun primitiveEquality (v, v') =
   let fun noFun () = raise RuntimeError "compared functions for equality"
@@ -4613,14 +4850,6 @@ datatype pretoken = QUOTE
                   | SHARP   of bool
                   | NAME    of string
 type token = pretoken plus_brackets
-(* Tokens of the micro-Scheme language          *)
-(*                                              *)
-(* [*] The general parsing mechanism described in *)
-(* Appendix [->] requires a language-specific   *)
-(* [[pretoken]] type, which adds tokens to the brackets *)
-(* described in \creflazyparse.chap. In addition to *)
-(* a bracket, a micro-Scheme token may be a quote mark, *)
-(* an integer literal, a Boolean literal, or a name. *)
 (* <boxed values 23>=                           *)
 type pretoken = pretoken
 type token = token
@@ -4630,6 +4859,8 @@ fun pretokenString (QUOTE)     = "'"
   | pretokenString (SHARP b)   = if b then "#t" else "#f"
   | pretokenString (NAME x)    = x
 val tokenString = plusBracketsString pretokenString
+(* For debugging, code in \creflazyparse.chap needs to *)
+(* be able to render a [[token]] as a string.   *)
 (* <boxed values 24>=                           *)
 val _ = op pretokenString : pretoken -> string
 val _ = op tokenString    : token    -> string
@@ -4645,17 +4876,6 @@ local
                          implode (c::listOfStream cs) ^ "'"
            in  SOME (ERROR msg, EOS)
            end
-  (* If the lexer doesn't recognize a bracket, quote mark, *)
-  (* integer, or other atom, it's expecting the line to *)
-  (* end. The end of the line may present itself as the *)
-  (* end of the input stream or as a stream of characters *)
-  (* beginning with a semicolon, which marks a comment. *)
-  (* If the lexer encounters any other character, *)
-  (* something has gone wrong. (The polymorphic type of *)
-  (* [[noneIfLineEnds]] provides a subtle but strong hint *)
-  (* that no token can be produced; the only possible *)
-  (* outcomes are that nothing is produced, or the lexer *)
-  (* detects an error.) [*]                       *)
   (* <boxed values 26>=                           *)
   val _ = op noneIfLineEnds : 'a lexer
   (* The [[atom]] function identifies the special literals *)
@@ -4672,18 +4892,6 @@ in
                   <|> (atom o implode) <$> many1 (sat (not o isDelim) one)
                   <|> noneIfLineEnds
                    )
-(* \qbreak                                      *)
-(*                                              *)
-(* Lexical analysis for micro-Scheme            *)
-(*                                              *)
-(* Lexical analysis turns a character stream into a *)
-(* token stream. The [[schemeToken]] function tries each *)
-(* alternative in turn: the two brackets, a quote mark, *)
-(* an integer literal, an atom, or end of line. An atom *)
-(* may be a [[SHARP]] name or a normal name.    *)
-(*                                              *)
-(* Before each micro-Scheme token, whitespace is *)
-(* ignored. [*]                                 *)
 (* <boxed values 25>=                           *)
 val _ = op schemeToken : token lexer
 val _ = op atom : string -> pretoken
@@ -4757,6 +4965,21 @@ val _ = op namelike : name parser
 (* abbreviations. Everything in the whole nest is *)
 (* mutually recursive. [*] [*]                  *)
 
+(* Identifying uML tokens                       *)
+(*                                              *)
+(* From the implementation of micro-Scheme in \cref *)
+(* mlschemea.chap, uML inherits the token parsers *)
+(* [[name]], [[booltok]], [[quote]], and [[int]]. But *)
+(* unlike micro-Scheme, uML has at least three different *)
+(* species of names: value constructors, value  *)
+(* variables, and type variables. To avoid mistakes, *)
+(* I don't use the [[name]] parser anywhere. A name will *)
+(* always be parsed with a parser that knows what *)
+(* species of name it's looking for.            *)
+(*                                              *)
+(* The [[name]] parser is inherited from the    *)
+(* implementation of micro-Scheme, so I disable it by *)
+(* rebinding [[name]] to a useless value.       *)
 (* <parsers for \uml\ tokens>=                  *)
 val name = () (* don't use me as a parser; too confusing *)
 (* The name of a type variable begins with a quote mark. *)
@@ -4765,8 +4988,6 @@ val tyvar =
   quote *> (  curry op ^ "'" <$> namelike
           <?> "type variable (got quote mark)"
            )
-(* To identify value constructors and value variables, *)
-(* I define two predicates.                     *)
 (* <parsers for \uml\ value constructors and value variables>= *)
 fun isVcon x =
   let val lastPart = List.last (String.fields (curry op = #".") x)
@@ -4776,9 +4997,6 @@ fun isVcon x =
       String.isPrefix "make-" x
   end
 fun isVvar x = x <> "->" andalso not (isVcon x)
-(* Each namelike thing gets its own parser. A value *)
-(* constructor may be not only a suitable name but also *)
-(* a Boolean literal or the empty list.         *)
 (* <parsers for \uml\ value constructors and value variables>= *)
 val arrow = sat (fn n => n = "->") namelike
 val vvar  = sat isVvar namelike
@@ -4808,11 +5026,6 @@ fun distinctBsIn bindings context =
 val _ = op formalsOf  : string -> name parser -> string -> name list parser
 val _ = op bindingsOf : string -> 'x parser -> 'e parser -> ('x * 'e) list
                                                                           parser
-(* \qbreak For [[let]] and [[letrec]] expressions, which *)
-(* do not permit multiple bindings to the same name, *)
-(* I define function [[distinctBsIn]], which enforces *)
-(* the constraint that all bound names are mutually *)
-(* distinct. \nwnarrowboxes                     *)
 (* <boxed values 28>=                           *)
 val _ = op distinctBsIn : (name * 'e) list parser -> string -> (name * 'e) list
                                                                           parser
@@ -4824,6 +5037,7 @@ fun asLambda inWhat (loc, e as LAMBDA _) = OK e
                  loc
 
 val asLambda = fn what => fn eparser => asLambda what <$>! @@ eparser
+(* A [[letrec]] may bind only lambda expressions. *)
 (* <boxed values 29>=                           *)
 val _ = op asLambda : string -> exp parser -> exp parser
 (* <parsers and parser builders for formal parameters and bindings>= *)
@@ -4843,6 +5057,13 @@ val _ = op recordFieldsOf : name parser -> name list parser
 fun kw keyword = 
   eqx keyword namelike
 fun usageParsers ps = anyParser (map (usageParser kw) ps)
+(* To define a parser for the bracketed expressions, *)
+(* I deploy the ``usage parser'' described in \cref *)
+(* lazyparse.chap. It enables me to define most of the *)
+(* parser as a table containing usage strings and *)
+(* functions. Function [[kw]] parses only the keyword *)
+(* passed as an argument. Using it, function    *)
+(* [[usageParsers]] strings together usage parsers. *)
 (* <boxed values 32>=                           *)
 val _ = op kw : string -> string parser
 val _ = op usageParsers : (string * 'a parser) list -> 'a parser
@@ -4859,8 +5080,16 @@ fun sexp tokens = (
 and notDot (loc, ".") =
       synerrorAt "this interpreter cannot handle . in quoted S-expressions" loc
   | notDot (_,   s)   = OK s
+(* With this machinery I can define a parser for quoted *)
+(* S-expressions. A quoted S-expression is a symbol, *)
+(* a number, a Boolean, a list of S-expressions, or a *)
+(* quoted S-expression.                         *)
 (* <boxed values 31>=                           *)
 val _ = op sexp : value parser
+(* Full Scheme allows programmers to notate arbitrary *)
+(* cons cells using a dot in a quoted S-expression. *)
+(* micro-Scheme doesn't.                        *)
+
 (* Parsers for micro-Scheme expressions         *)
 (*                                              *)
 (* I define distinct parses for atomic expressions *)
@@ -4900,21 +5129,117 @@ fun arrowsOf conapp funty =
         | arrows args (_::_::_) = ERROR "multiple arrows in function type"
   in  fn xs => errorLabel "syntax error: " o arrows xs
   end
+(* \qbreak A type variable begins with a quote mark. *)
 (* <boxed values 58>=                           *)
 val _ = op tyvar : name parser
 (* <boxed values 58>=                           *)
 val _ = op distinctTyvars : name list parser
-(* Function [[distinctTyvars]] is used in multiple *)
-(* interpreters.                                *)
+(* Lexical analysis, parsing, and reading input using ML *)
+(*                                              *)
+(* [*][*] \invisiblelocaltableofcontents[*]     *)
+(*                                              *)
+(* How is a program represented? If you have worked *)
+(* through this book, you will believe (I hope) that the *)
+(* most fundamental and most useful representation of a *)
+(* program is its abstract-syntax tree. But syntax trees *)
+(* aren't easy to create or specify directly, so syntax *)
+(* usually has to be written using a sequence of *)
+(* characters. To help myself write parsers by hand, *)
+(* I have created [I~say ``created,'' but it would be *)
+(* more accurate to say ``stolen.'' ] a set of  *)
+(* higher-order functions designed especially to *)
+(* manipulate parsers. Such functions are known as *)
+(* parsing combinators. My parsing combinators appear in *)
+(* this appendix.                               *)
+(*                                              *)
+(* Most parsing techniques have been invented for use in *)
+(* compilers. and a typical compiler swallows programs *)
+(* in large gulps, one file at a time. Unlike these *)
+(* typical compilers, the interpreters in this book are *)
+(* interactive, and they swallow just one line at a *)
+(* time. Interactivity imposes additional requirements: *)
+(*                                              *)
+(*   • Before reading a line of input, an interactive *)
+(*  interpreter should issue a suitable prompt. *)
+(*  The prompt should tell the user whether the *)
+(*  parser is waiting for a new definition or is in *)
+(*  the middle of parsing a current definition—which *)
+(*  means that the line-reading functions must be in *)
+(*  cahoots with the parser.                    *)
+(*   • If a parser encounters an error, it can't just *)
+(*  give up. It needs to get itself back into a state *)
+(*  where the user can continue to interact.    *)
+(*                                              *)
+(* These requirements make my parsing combinators a bit *)
+(* different from standard ones. In particular, in order *)
+(* to be sure that the actions of printing a prompt and *)
+(* reading a line of input occur in the proper sequence, *)
+(* I manage these actions using the lazy streams defined *)
+(* in \crefmlinterps.streams. Unlike the lazy streams *)
+(* built into Haskell, these lazy streams can do input *)
+(* and output and can perform other actions.    *)
+(*                                              *)
+(* Parsing is about turning a stream of lines (from a *)
+(* file or from a list of strings) into a stream of *)
+(* extended definitions. It happens in stages:  *)
+(*                                              *)
+(*   • In a stream of lines, each line is split into *)
+(*  characters.                                 *)
+(*   • A lexical analyzer turns a stream of characters *)
+(*  into a stream of tokens. Using              *)
+(*  [[streamConcatMap]] with the lexical analyzer *)
+(*  then turns a stream of lines into a stream of *)
+(*  tokens.                                     *)
+(*   • A parser turns a stream of tokens into a stream *)
+(*  of syntax. I define parsers for expressions, true *)
+(*  definitions, unit tests, and extended       *)
+(*  definitions.                                *)
+(*                                              *)
+(* The fundamental parser is [[one]], which takes one *)
+(* token from a stream and produces that token. Other *)
+(* parsers are built on top of [[one]], usually using *)
+(* higher-order functions. Functions [[<>]] and [[<*>]] *)
+(* act like [[map]] for parsers, applying a function the *)
+(* result a parser returns. Function [[sat]] acts like *)
+(* [[filter]], allowing a parser to fail if it doesn't *)
+(* recognize its input. Functions [[<*>]], [[<*]], and  *)
+(* [[*>]] combine parsers in sequence, and function *)
+(* [[<|>]] defines a parser as a choice between two *)
+(* other parsers. Functions [[many]] and [[many1]] turn *)
+(* a parser for a thing into a parser for a list of *)
+(* things; function [[optional]] does the same thing for *)
+(* ML's [[option]] type. These functions are known *)
+(* collectively as parsing combinators, and together *)
+(* they form a powerful language for defining lexical *)
+(* analyzers and parsers.                       *)
+(*                                              *)
+(* I divide parsers and parsing combinators into three *)
+(* groups:                                      *)
+(*                                              *)
+(*   • A stream transformer doesn't care what comes in *)
+(*  or goes out; it is polymorphic in both the input *)
+(*  and output type. Stream transformers are used to *)
+(*  build both lexical analyzers and parsers.   *)
+(*   • A lexer is a stream transformer that is *)
+(*  specialized to take a stream of characters as *)
+(*  input. Lexers may be defined with any output *)
+(*  type, but a value of that output type should *)
+(*  represent a token.                          *)
+(*   • A parser is a stream transformer that is *)
+(*  specialized to take a stream of tokens as input. *)
+(*  A parser's input stream also includes source-code *)
+(*  locations and end-of-line markers. Parsers may be *)
+(*  defined with any output type, but the rest of the *)
+(*  interpreter is most interested in the parser that *)
+(*  produces a stream of definitions (abstract-syntax *)
+(*  trees).                                     *)
+(*                                              *)
+(* The polymorphic functions are described in \crefpage *)
+(* (lazyparse.fig.xformer; the specialized functions are *)
+(* described in \crefpage(lazyparse.fig.lexers-parsers. *)
+(*                                              *)
+(* The code is divided among these chunks:      *)
 
-(* Parsing a type in brackets is tricky enough that *)
-(* I define a function just for that job. The [[arrows]] *)
-(* function takes two lists: the types that appear *)
-(* before the first arrow, and a list of lists of types *)
-(* that appear after an arrow. To make it usable with *)
-(* languages beyond Typed uScheme, I abstract over the *)
-(* [[conapp]] and [[funty]] functions that are used to *)
-(* build types.                                 *)
 (* <boxed values 58>=                           *)
 val _ = op arrowsOf : ('ty * 'ty list -> 'ty) -> ('ty list * 'ty -> 'ty) -> 'ty
                                               list -> 'ty list list -> 'ty error
@@ -4925,13 +5250,9 @@ fun distinctTBsIn tbindings context =
                                                                              bs)
   in  check <$>! @@ tbindings
   end
-(* Instantiation is also implemented by substitution. *)
-(* It builds a type environment that maps formal type *)
-(* parameters to actual type parameters. Most of the *)
-(* code enforces restrictions: only quantified types may *)
-(* be instantiated, only at actual types of kind *)
-(* [[TYPE]], and only with the right number of types. \ *)
-(* tusflabelinstantiate                         *)
+(* Each [[letrec]] form has to have mutually distinct *)
+(* names. That requirement is enforced by function *)
+(* [[distinctTBsIn]].                           *)
 (* <boxed values 62>=                           *)
 val _ = op distinctTBsIn : ((name * 't) * 'e) list parser -> string -> ((name *
                                                            't) * 'e) list parser
@@ -4942,9 +5263,6 @@ fun typedFormalsOf name colon ty context =
   let val formal = typedFormalOf name colon ty
   in  distinctBsIn (bracket("(... [x : ty] ...)", many formal)) context
   end                            
-(* A function definition has a list of typed formal *)
-(* parameters. Each formal parameter is bound to a type, *)
-(* and the names must be mutually distinct.     *)
 (* <boxed values 264>=                          *)
 val _ = op typedFormalsOf : string parser -> 'b parser -> 'a parser  -> string
                                                     -> (string * 'a) list parser
@@ -5015,11 +5333,6 @@ val patFormals    = bracket ("(p1 p2 ...)", many pattern)
 (* <boxed values 175>=                          *)
 val _ = op vvarFormalsIn : string -> name list parser
 val _ = op patFormals    :            pat list parser
-(* The parser for expressions includes both flavors of *)
-(* bindings, but the ``expression builders'' used to *)
-(* build the abstract syntax work only with the names *)
-(* flavor. Expression builders that work with the *)
-(* patterns flavor are left as exercises.       *)
 (* <parsers and [[xdef]] streams for \uml>=     *)
 (* <utility functions that help implement \uml's syntactic sugar ((prototype))>= *)
 fun freeIn exp y =
@@ -5040,47 +5353,21 @@ fun freshVar e =
   case streamGet (streamFilter (not o freeIn e) varsupply)
     of SOME (x, _) => x
      | NONE => raise InternalError "unable to create a fresh variable"
-(* The [[elem]] type in the result module is known to be *)
-(* equal to the type [[t]] in the parameter module, *)
-(* [[Elem]]. That crucial identity can be expressed only *)
-(* because the formal parameter is named.       *)
-(*                                              *)
-(* Module type [[GENERIC-ARRAY]] is the type of the *)
-(* primitive module [[Array]]:                  *)
+(* To desugar the new syntax, you will sometimes need to *)
+(* find a variable that is not free in a given  *)
+(* expression. If you have done \cref           *)
+(* mlscheme.ex.closure-code in \crefmlscheme.chap (\ *)
+(* cpagerefmlscheme.ex.closure-code), you're almost *)
+(* there. Use that code to complete function [[freeIn]] *)
+(* here.                                        *)
 (* <boxed values 187>=                          *)
 val _ = op freeIn : exp -> name -> bool
-(* A module-arrow type is well formed only if the module *)
-(* type of each formal parameter describes an exporting *)
-(* module, not a generic module—that's the predicative *)
-(* polymorphism. The module type of each parameter must *)
-(* be well formed, and the module type of the result *)
-(* must also be well formed. The module type of the *)
-(* result may refer to formal parameters, like [[Elem]] *)
-(* in the example above. And the module types of later *)
-(* parameters may refer to earlier parameters. [ *)
-(* A~function type with these kinds of references is *)
-(* called a \emph{dependent function type}; in~type *)
-(* theory, it~is often written with a $\Pi$ symbol, as *)
-(* in $\Pi x\mathord:\tau \alldot \tau'$, where $\tau'$ *)
-(* may mention~$x$.\index{dependent function types}] *)
-(*                                              *)
-(* A generic module is introduced using the same *)
-(* definition form as an exporting module, except that *)
-(* it uses the keyword [[generic-module]], and the *)
-(* module type used to seal it must be a module-arrow *)
-(* type. For an example, see the definition of generic *)
-(* module [[ArrayHeap]] in \chunkrefmcl.chunk.ArrayHeap. *)
-(*                                              *)
-(* A generic module is eliminated by instantiating it. *)
-(* Instantiation creates an exporting instance of a *)
-(* generic module. The concrete syntax resembles the *)
-(* instantiation of a polymorphic value in Typed *)
-(* uScheme, but to remind us of the distinction between *)
-(* a generic module in \mcl and a polymorphic value in *)
-(* Typed uScheme, a generic instantiation is written *)
-(* using keyword [[@m]]. For example, the predefined *)
-(* module [[String]] is an instance of the generic *)
-(* [[Array]] module:                            *)
+(* \qbreak Once [[freeIn]] is implemented, you can come *)
+(* up with fresh variables by using the helper functions *)
+(* below. Function [[freshVar]] returns a variable that *)
+(* is not free in a given expression. The supply of *)
+(* variables is infinite, so the exception should never *)
+(* be raised.                                   *)
 (* <boxed values 187>=                          *)
 val _ = op varsupply : name stream
 val _ = op freshVar  : exp -> name
@@ -5157,6 +5444,8 @@ fun exptable exp =
       val letBs     = distinctBsIn (bindingsOf "(x e)" vvar exp) "let"
       val letstarBs = bindingsOf "(x e)" vvar exp
       val formals   = vvarFormalsIn "lambda"
+      (* The syntactic sugar for patterns is recognized by *)
+      (* these parsers:                               *)
       (* <parsers for bindings to patterns>=          *)
       val patBs       = bindingsOf "(p e)" pattern exp
       val patLetrecBs = map (fn (x, e) => (PVAR x, e)) <$> letrecBs
@@ -5175,6 +5464,10 @@ fun exptable exp =
       fun letx letkind bs e = LETX (letkind, bs, e)
       fun lambda xs e = LAMBDA (xs, e)
       fun lambdastar clauses = ERROR "lambda* is left as an exercise"
+      (* When syntactic sugar for patterns is introduced, it *)
+      (* will be necessary to define new versions of the *)
+      (* expression-builders [[lambda]], [[lambdastar]], and *)
+      (* [[letx]].                                    *)
       (* <boxed values 177>=                          *)
       val _ = op letx       : let_flavor -> (name * exp) list -> exp -> exp
       val _ = op lambda     : name list -> exp -> exp
@@ -5189,11 +5482,7 @@ fun exptable exp =
       (* some code chunks with appropriate parsers:   *)
       (* <\uml\ expression builders that expect to bind patterns>= *)
       (* you can redefine letx, lambda, and lambdastar here *)
-  in  (* Once the [[lambdastar]] exercise is completed, the *)
-      (* parser below should recognize all the expressions. *)
-      (* It also recognizes [[while]] and [[set]], which it *)
-      (* rejects with an error message.               *)
-      (* <parsers for expressions that begin with keywords>= *)
+  in  (* <parsers for expressions that begin with keywords>= *)
       usageParsers
         [ ("(if e1 e2 e3)",            curry3 IFX    <$> exp  <*> exp <*> exp)
         , ("(begin e1 ...)",                  BEGIN  <$> many exp)
@@ -5328,7 +5617,12 @@ val def =
                                       data <$> kind <*> tyname <*> many Kty)
       ]
   end
-(* True definitions are parsed by [[def]].      *)
+(* Function [[atLoc]] is often called by the    *)
+(* higher-order function [[located]], which converts a *)
+(* function that expects [['a]] into a function that *)
+(* expects \monobox'a located. Function [[leftLocated]] *)
+(* does something similar for a pair in which only the *)
+(* left half must include a source-code location. *)
 (* <boxed values 183>=                          *)
 val _ = op def : def parser
 (* <parsers and [[xdef]] streams for \uml>=     *)
@@ -5354,8 +5648,6 @@ val xdeftable = usageParsers
   (* <rows added to \uml's [[xdeftable]] in exercises ((prototype))>= *)
   (* you can add a row for 'val' here *)
   ]
-(* The other extended definitions are parsed by *)
-(* [[xdeftable]].                               *)
 (* <boxed values 185>=                          *)
 val _ = op xdeftable : xdef parser
 (* <parsers and [[xdef]] streams for \uml>=     *)
@@ -5404,16 +5696,6 @@ fun filexdefs (filename, fd, prompts) =
       xdefstream (filename, filelines fd, prompts)
 fun stringsxdefs (name, strings) =
       xdefstream (name, streamOfList strings, noPrompts)
-(* \qbreak                                      *)
-(*                                              *)
-(* Streams of extended definitions              *)
-(*                                              *)
-(* Every bridge language has its own parser, called *)
-(* [[xdefstream]], which converts a stream of lines to a *)
-(* stream of [[xdef]]s. But as in \cref         *)
-(* cinterps.shared-xdef-streams, the convenience *)
-(* functions [[filexdefs]] and [[stringsxdefs]] are *)
-(* shared.                                      *)
 (* <boxed values 125>=                          *)
 val _ = op xdefstream   : string * line stream     * prompts -> xdef stream
 val _ = op filexdefs    : string * TextIO.instream * prompts -> xdef stream
@@ -5427,12 +5709,57 @@ val _ = op stringsxdefs : string * string list               -> xdef stream
 (*                                                               *)
 (*****************************************************************)
 
-(* \qbreak A basis is a quadruple <Gamma, Delta, \ *)
-(* tyconset, rho>. But \tyconset is represented *)
-(* implicitly, by the contents of the mutable reference *)
-(* cell [[nextIdentity]], so the representation of a *)
-(* basis contains only the components Gamma, Delta, and  *)
-(* rho.                                         *)
+(* A last word about function [[readEvalPrintWith]]: you *)
+(* might be wondering, ``where does it read, evaluate, *)
+(* and print?'' It has helpers for that: reading is a *)
+(* side effect of [[streamGet]], which is called by *)
+(* [[streamFold]], and evaluating and printing are done *)
+(* by [[processDef]]. But the function is called *)
+(* [[readEvalPrintWith]] because when you want reading, *)
+(* evaluating, and printing to happen, you call \monobox *)
+(* readEvalPrintWith eprintln, passing your extended *)
+(* definitions and your environments.           *)
+(*                                              *)
+(* Handling exceptions                          *)
+(*                                              *)
+(* When an exception is raised, a bridge-language *)
+(* interpreter must ``catch'' or ``handle'' it. *)
+(* An exception is caught using a syntactic form written *)
+(* with the keyword [[handle]]. (This form resembles a *)
+(* combination of a [[case]] expression with the *)
+(* [[try-catch]] form from \crefschemes.chap.) Within *)
+(* the [[handle]], every exception that the interpreter *)
+(* recognizes is mapped to an error message tailored for *)
+(* that exception. To be sure that every exception is *)
+(* responded to in the same way, no matter where it is *)
+(* handled, I write just a single [[handle]] form, and I *)
+(* deploy it in a higher-order, continuation-passing *)
+(* function: [[withHandlers]].                  *)
+(*                                              *)
+(* In normal execution, calling \monoboxwithHandlers f a *)
+(* caught applies function [[f]] to argument [[a]] and *)
+(* returns the result. But when the application f a *)
+(* raises an exception, [[withHandlers]] uses [[handle]] *)
+(* to recover from the exception and to pass an error *)
+(* message to [[caught]], which acts as a failure *)
+(* continuation (\crefpage,scheme.cps). Each error *)
+(* message contains the string [["<at loc>"]], which can *)
+(* be removed (by [[stripAtLoc]]) or can be filled in *)
+(* with an appropriate source-code location (by  *)
+(* [[fillAtLoc]]).                              *)
+(*                                              *)
+(* The most important exceptions are [[NotFound]], *)
+(* [[RuntimeError]], and [[Located]]. Exception *)
+(* [[NotFound]] is defined in \crefmlscheme.chap; the *)
+(* others are defined in this appendix. Exceptions *)
+(* [[NotFound]] and [[RuntimeError]] signal problems *)
+(* with an environment or with evaluation, respectively. *)
+(* Exception [[Located]] wraps another exception [[exn]] *)
+(* in a source-code location. When [[Located]] is *)
+(* caught, [[withHandlers]] calls itself recursively *)
+(* with a function that ``re-raises'' exception [[exn]] *)
+(* and with a failure continuation that fills in the *)
+(* source location in [[exn]]'s error message.  *)
 (* <definition of [[basis]] for \uml>=          *)
 type basis = type_env * (ty * kind) env * value env
 
@@ -5459,8 +5786,50 @@ end
 fun txType (TYNAME t, Delta) =
       (find (t, Delta)
        handle NotFound _ => raise TypeError ("unknown type name " ^ t))
-(* A type variable is treated the same way. \usety *)
-(* KindIntroVar                                 *)
+(* Function [[revapp]] is written exactly as we wrote it *)
+(* in micro-Scheme.                             *)
+(*                                              *)
+(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
+(* \csynlabelnml \productionwidthlet-keyword \advance\ *)
+(* minusproductiongluesizeby 2pt {production}def [[(val *)
+(* ]]\termvariable-name exp[[)]] | [[(val-rec ]]\term *)
+(* variable-name exp[[)]] | exp | [[(define ]]\term *)
+(* function-name (formals) exp[[)]] | [[(use ]]\term *)
+(* file-name[[)]] | unit-test \newruleunit-test *)
+(* [[(check-expect]] exp exp[[)]] | [[(check-assert]] *)
+(* exp[[)]] | [[(check-error]] exp[[)]] |       *)
+(* [[(check-type]] exp type-exp[[)]] |          *)
+(* [[(check-principal-type]] exp type-exp[[)]] | *)
+(* [[(check-type-error]] exp[[)]] \newruleexp literal | *)
+(* \termvariable-name | [[(if ]]exp exp exp[[)]] | *)
+(* [[(begin ]]\sequenceexp[[)]] | [[(]]exp \sequenceexp *)
+(* [[)]] | [[(]]let-keyword [[(]]\sequence[[(]]\term *)
+(* variable-name exp[[)]][[) ]]exp[[)]] | [[(lambda (]] *)
+(* formals[[) ]]exp[[)]] \newrulelet-keyword \alternate *)
+(* *let | let* | letrec \newruletype-exp \term  *)
+(* type-constructor-name | '\termtype-variable-name | *)
+(* [[(forall []]\sequence'\termtype-variable-name[[] ]] *)
+(* type-exp[[)]] | [[(]]\sequencetype-exp[[ -> ]] *)
+(* type-exp[[)]] | [[(]]type-exp \sequencetype-exp[[)]] *)
+(* \newruleformals \sequence\termvariable-name \newrule *)
+(* literal \alternate*\termnumeral | [[#t]] | [[#f]] | *)
+(* [[']]S-exp | [[(quote ]]S-exp[[)]] \newruleS-exp \ *)
+(* alternate*literal | \termsymbol-name | [[(]]\sequence *)
+(* S-exp[[)]] \newrulenumeral@\termnumeral \grammarbox *)
+(* token composed only of digits, possibly prefixed with *)
+(* a plus or minus sign \newrulename@\term*-name \ *)
+(* grammarboxtoken that is not a bracket, a numeral, or *)
+(* one of the ``reserved'' words shown in typewriter *)
+(* font {production}                            *)
+(*                                              *)
+(* The concrete syntax of \nml [*]              *)
+(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
+(* \noproductionwidth                           *)
+(*                                              *)
+(* Abstract syntax and values \maintocsplitof \nml *)
+(*                                              *)
+(* \Nml's abstract syntax is the same as micro-Scheme's, *)
+(* minus [[WHILEX]] and [[SET]]. \nmllabelexp   *)
 (* <translation of {\uml} type syntax into types>= *)
   | txType (TYVARX a, Delta) =
       (find (a, Delta)
@@ -5488,9 +5857,16 @@ fun txType (TYNAME t, Delta) =
                  if eqKinds (kinds, argks) then
                    (CONAPP (tau, taus), resultk)
                  else
-                   (* Error cases for elaboration of type syntax   *)
+                   (* Code used to debug parsers                   *)
                    (*                                              *)
-                   (* Error messages for bad type syntax are issued here. *)
+                   (* When debugging parsers, I often find it helpful to *)
+                   (* dump out the tokens that a parser is looking at. *)
+                   (* I want to dump only the tokens that are available *)
+                   (* without triggering the action of reading another line *)
+                   (* of input. To get those tokens, function      *)
+                   (* [[safeTokens]] reads until it has got to both an *)
+                   (* end-of-line marker and a suspension whose value has *)
+                   (* not yet been demanded.                       *)
                    (* <applied type constructor [[tx]] has the wrong kind>= *)
                    if length argks <> length kinds then
                      raise TypeError ("type constructor " ^ typeString tau ^
@@ -5735,11 +6111,7 @@ fun typeDataDef ((T, kind, vcons), Gamma, Delta) =
       val _ = op appliesMu             : ty -> bool
       val _ = op validateTyvarArguments : ty -> unit
       val _ = op validateLengths       : tyvar list * kind list -> unit
-        in  (* \qbreak The case analysis includes one case per rule. *)
-            (* In addition, there is a catchall case that matches *)
-            (* when the shape of the type scheme doesn't match the *)
-            (* kind of µ.                                  *)
-
+        in
       (* <validation by case analysis on [[schemeShape shape]] and [[kind]]>= *)
             case (schemeShape sigma, kind)
               of (MONO_VAL tau, TYPE) =>
@@ -5978,8 +6350,6 @@ fun processDataDef (dd, (Gamma, Delta, rho), interactivity) =
                 ()
   in  (Gamma', Delta', rho')
   end
-(* To process a data definition, use [[typeDataDef]] and *)
-(* [[evalDataDef]].                             *)
 (* <boxed values 154>=                          *)
 val _ = op processDataDef : data_def * basis * interactivity -> basis
 
@@ -6124,301 +6494,37 @@ val predefinedTypeBasis =
                              ,
                        ";  monomorphic type. When type parameters are present, "
                              ,
-       ";  every value construa]\\kinda kind, which classifies types The first "
+                         ";  every value constructor is polymorphic in exactly "
                              ,
-                        ";  kind is written \\ktype and pronounced ``type'';\\ "
+                    ";  those parameters. Type name \\stycon is applied to the "
                              ,
-                     ";  notation [type]\\ktypethe kind ascribed to types that "
+                      ";  parameters and is given a kind consistent with them. "
                              ,
-                       ";  classify terms the second kind is written \\ktype\\ "
+                      ";  In the interpreter, the desugaring is implemented by "
                              ,
-                       ";  karrow\\ktype and pronounced ``type arrow type.''\\ "
+                    ";  function [[makeExplicit]] (\\crefadta.chap, \\cpageref "
                              ,
-                       ";  notation [arrow]\\karrowused to form kinds of type  "
-                             ,
-                          ";  constructors A kind is attributed to a type by a "
-                             ,
-                  ";  formal judgment: tau:: \\kind\\notation [tau has kind \\ "
-                             ,
-                    ";  kind]tau:: \\kindascribes kind \\kind to type tau says "
-                             ,
-                            ";  that type constructor tau has kind kappa. As a "
-                             ,
-                           ";  special case, the judgment ``tau:: \\ktype'' is "
-                             ,
-                      ";  equivalent to the judgment ``tau is a type'' used in "
-                             ,
-                              ";  Typed Impcore.                               "
+                              ";  adt.fun.makeExplicit).                       "
                              ,
                               ";                                               "
                              ,
-                       ";  Like types, kinds are defined inductively: there is "
-                             ,
-                    ";  one base kind, ``type'' (\\ktype), and other kinds are "
-                             ,
-                    ";  made using arrows (\\karrow). As concrete notation, we "
-                             ,
-                       ";  write {production}k@\\kind \\alternate*\\ktype | \\ "
-                             ,
-                   ";  crossdotsn\\kind\\karrow\\kind. {production} Types that "
-                             ,
-                        ";  are inhabited by values, like [[int]] or \\monobox "
-                             ,
-                     ";  (list bool), have kind \\ktype. Types of other kinds, "
-                             ,
-                       ";  like [[list]] and [[array]], are ultimately used to "
-                             ,
-                             ";  make types of kind \\ktype.                   "
+                             ";  Predefined algebraic \\chaptocsplitdata types "
                              ,
                               ";                                               "
                              ,
-                      ";  Some common kinds, with example type constructors of "
+                     ";  Many of the algebraic data types found in Standard ML "
                              ,
-                              ";  those kinds, are as follows: {indented}      "
+                        ";  are also predefined in uML. They are defined using "
                              ,
-                              ";                                               "
+                     ";  [[data]] or [[implicit-data]]. In most cases, to make "
                              ,
-                        ";  \\ktype                [[int]], [[bool]], [[unit]] "
+                       ";  the types of the value constructors explicit, I use "
                              ,
-                  ";  \\ktype\\karrow\\ktype   [[list]], [[array]], [[option]] "
-                             ,
-                     ";  \\ktype*\\ktype\\karrow\\ [[pair]], [[sum]], Standard "
-                             ,
-                              ";  ktype                 ML's [[->]]            "
+                              ";  the [[data]] form.                           "
                              ,
                               ";                                               "
                              ,
-                              ";  {indented} More exotic kinds can be found in "
-                             ,
-                           ";  languages like Haskell, which includes not only "
-                             ,
-                   ";  ``monads,'' which are all types of kind \\ktype\\karrow "
-                             ,
-                       ";  \\ktype, but also ``monad transformers,'' which are "
-                             ,
-                 ";  types of kind (\\ktype\\karrow\\ktype) \\karrow(\\ktype\\ "
-                             ,
-                             ";  karrow\\ktype).                               "
-                             ,
-                              ";                                               "
-                             ,
-                       ";  Every syntactically expressible kind \\kind is well "
-                             ,
-                      ";  formed: \\jlabeltuscheme.good.kind\\isakind\\kind \\ "
-                             ,
-                           ";  tyrule,KindFormationType \\isakind\\ktype \\    "
-                             ,
-                  ";  tyrule.KindFormationArrow \\twoquad \\arekinds\\ldotsn\\ "
-                             ,
-                ";  kind \\isakind\\kind \\isakind\\crossdotsn\\kind\\karrow\\ "
-                             ,
-                              ";  kind                                         "
-                             ,
-                              ";                                               "
-                             ,
-                         ";  How do we know which type constructors have which "
-                             ,
-                     ";  kinds? The kind of each type constructor is stored in "
-                             ,
-                      ";  a kind environment, written Delta.\\notation [delta] "
-                             ,
-                          ";  Deltaa kind environment The example environment  "
-                             ,
-                       ";  Delta_0 below shows the kinds of the primitive type "
-                             ,
-                            ";  constructors of Typed uScheme. Each binding is "
-                             ,
-                        ";  written using the :: symbol, which is used instead "
-                             ,
-                              ";  of |->; it is pronounced ``has kind.''       "
-                             ,
-                              ";                                               "
-                             ,
-                         ";   Delta_0 int:: \\ktype, bool:: \\ktype, unit:: \\ "
-                             ,
-                    ";   = {     ktype, pair :: \\ktype*\\ktype\\karrow\\ktype "
-                             ,
-                              ";           ,                                   "
-                             ,
-                     ";           sum :: \\ktype*\\ktype\\karrow\\ktype, array "
-                             ,
-                     ";           :: \\ktype\\karrow\\ktype, list :: \\ktype\\ "
-                             ,
-                             ";           karrow\\ktype }                      "
-                             ,
-                              ";                                               "
-                             ,
-                      ";  The kind environment determines how both [[int]] and "
-                             ,
-                       ";  [[array]] may be used. New type constructors can be "
-                             ,
-                     ";  added to Typed uScheme just by adding them to Delta_0 "
-                             ,
-                             ";  (\\                                           "
-                             ,
-";  creftypesys.ex.tuscheme-sums,typesys.ex.tuscheme-pairs,typesys.ex.tuscheme-queues,typesys.ex.polyrefs). "
-                             ,
-                              ";                                               "
-                             ,
-                         ";  A kind environment is used to tell what types are "
-                             ,
-                     ";  well formed. No matter how many type constructors are "
-                             ,
-                              ";  defined, they are handled using just three   "
-                             ,
-                              ";  type-formation rules:                        "
-                             ,
-                              ";                                               "
-                             ,
-                              ";    • A type can be formed by writing a type "
-                             ,
-                              ";   constructor. In abstract syntax, a type     "
-                             ,
-                     ";   constructor is written \\asttycon(\\tycon), where \\ "
-                             ,
-                        ";   tycon is the name of the constructor. In concrete "
-                             ,
-                           ";   syntax it is written just using its name, like "
-                             ,
-                          ";   [[int]] or [[list]]. A type constructor is well "
-                             ,
-                              ";   formed if and only if it is bound in Delta. "
-                             ,
-                              ";                                               "
-                             ,
-                    ";    • A type can be formed by applying a type to other "
-                             ,
-                           ";   types. In abstract syntax, type application is "
-                             ,
-                       ";   written \\astconapp(tau, [\\ldotsntau]), where tau "
-                             ,
-                           ";   and \\ldotsntau are type-level expressions. In "
-                             ,
-                              ";   concrete syntax, application of a type      "
-                             ,
-                           ";   constructor is written using the same concrete "
-                             ,
-                        ";   syntax as application of a function. For example, "
-                             ,
-                             ";   \\monobox(list int) is the type ``list of    "
-                             ,
-                             ";   integer.'' A constructor application is well "
-                             ,
-                              ";   formed if its arguments have the kinds it   "
-                             ,
-                          ";   expects, as formalized in the \\rulenameKindApp "
-                             ,
-                              ";   rule below.                                 "
-                             ,
-                              ";                                               "
-                             ,
-                          ";    • A type can be a function type. In abstract "
-                             ,
-                        ";   syntax, it is \\nomathbreak\\crossdotsntau-->tau, "
-                             ,
-                         ";   where \\ldotsntau are the argument types and tau "
-                             ,
-                              ";    is the result type. In concrete syntax,    "
-                             ,
-                        ";   a function type is \\monobox(\\cdotsntau -> tau). "
-                             ,
-                           ";   [The arrow that signifies a function occurs in "
-                             ,
-                           ";   the \\emph{middle} of the parentheses, between "
-                             ,
-                         ";   types. In~other words, the function arrow [[->]] "
-                             ,
-                          ";   is an \\emph{infix} operator. This infix syntax "
-                             ,
-                          ";   violates \\lisp's \\emph{prefix} convention, in "
-                             ,
-                         ";   which keywords, type constructors, and operators "
-                             ,
-                             ";   always come first, immediately after an open "
-                             ,
-                          ";   parenthesis. Prefix syntax might look like ``\\ "
-                             ,
-                        ";   monobox{(function ($\\tau_1~\\ldots~\\tau_n$) $\\ "
-                             ,
-                        ";   tau$)}.'' But when functions take or return other "
-                             ,
-                          ";   functions, prefix syntax is too hard to read. ] "
-                             ,
-                            ";   A function type is well formed if and only if "
-                             ,
-                            ";   types tau_1 to tau_n and tau all have kind \\ "
-                             ,
-                              ";   ktype.                                      "
-                             ,
-                              ";                                               "
-                             ,
-                     ";  These rules are formalized using the kinding judgment "
-                             ,
-                        ";  \\kindistau\\kind. [*]\\jlabeltuscheme.good.type\\ "
-                             ,
-                           ";  kindistau\\kind This judgment says that in kind "
-                             ,
-                          ";  environment Delta, type-level expression tau has "
-                             ,
-                    ";  kind \\kind. Kinds classify types in much the same way "
-                             ,
-                    ";  that types classify expressions. \\tyrule KindIntroCon "
-                             ,
-                  ";  \\tyconin dom Delta \\kindis\\asttycon(\\tycon) Delta(\\ "
-                             ,
-                 ";  tycon) \\tyrule KindApp \\twoquad \\kindistau\\crossdotsn "
-                             ,
-                   ";  \\kind\\karrow\\kind \\repeati\\kindistau_i \\kind_i \\ "
-                             ,
-                     ";  kindis\\astconapp(tau, [\\ldotsntau]) \\kind \\tyrule "
-                             ,
-                  ";  KindFunction \\twoquad \\repeati\\kindistau_i \\ktype \\ "
-                             ,
-                    ";  kindistau\\ktype \\kindis\\crossdotsntau-->tau \\ktype "
-                             ,
-                        ";  No matter how many type constructors we may add to "
-                             ,
-                     ";  Typed uScheme, these kinding rules tell us everything "
-                             ,
-                          ";  we will ever need to know about the formation of "
-                             ,
-                       ";  types. Compare this situation with the situation in "
-                             ,
-                           ";  Typed Impcore. In Typed Impcore, we need the \\ "
-                             ,
-                       ";  rulenameBaseTypes rule for [[int]] and [[bool]]. \\ "
-                             ,
-                             ";  stdbreak To add arrays we need the \\         "
-                             ,
-                        ";  rulenameArrayFormation rule. To add lists we would "
-                             ,
-                             ";  need a list-formation rule (\\                "
-                             ,
-                           ";  crefpage,typesys.ex.timpcore-lists). And so on. "
-                             ,
-                       ";  Unlike Typed Impcore's type system, Typed uScheme's "
-                             ,
-                          ";  type system can easily be extended with new type "
-                             ,
-                             ";  constructors (\\                              "
-                             ,
-";  creftypesys.ex.tuscheme-queues,typesys.ex.tuscheme-pairs,typesys.ex.tuscheme-sums,typesys.ex.polyrefs). "
-                             ,
-                             ";  Similar ideas are used in languages in which  "
-                             ,
-                             ";  programmers can define new type constructors, "
-                             ,
-                        ";  including uML and \\mcl (\\crefadt.chap,mcl.chap). "
-                             ,
-                              ";                                               "
-                             ,
-                              ";  Implementing kinds                           "
-                             ,
-                              ";                                               "
-                             ,
-                     ";  A kind is represented using the datatype [[kind]]. \\ "
-                             ,
-                              ";  tuslabelkind                                 "
+                              ";  A Boolean is either [[#t]] or [[#f]].        "
                              , ";  <predefined uML types>=                   "
                              , "(data * bool"
                              , "  [#t : bool]"
@@ -6474,26 +6580,10 @@ val predefinedTypeBasis =
                               ";  another.                                     "
                              , ";  <predefined uML types>=                   "
                              , "(implicit-data order LESS EQUAL GREATER)"
-                             ,
-                              ";  Predefined tuple types                       "
-                             ,
-                              ";                                               "
-                             ,
-                     ";  [*] Most of the predefined types ([[bool]], [[list]], "
-                             ,
-                     ";  and [[unit]]) are defined in \\crefadt.chap. Only the "
-                             ,
-                              ";  tuple types are defined here.                "
                              , ";  <predefined uML types>=                   "
                              , "(data (* * * => *) triple"
                              ,
              "  [TRIPLE : (forall ['a 'b 'c] ('a 'b 'c -> (triple 'a 'b 'c)))])"
-                             ,
-                          ";  When defining larger tuples, the notation of the "
-                             ,
-                              ";  explicit [[data]] form is untenable. The     "
-                             ,
-                              ";  [[implicit-data]] form is superior. [*]      "
                              , ";  <predefined uML types>=                   "
                              , "(implicit-data ('a1 'a2 'a3 'a4) 4-tuple"
                              , "         [T4 of 'a1 'a2 'a3 'a4])"
@@ -6517,34 +6607,6 @@ val predefinedTypeBasis =
             "(implicit-data ('a1 'a2 'a3 'a4 'a5 'a6 'a7 'a8 'a9 'a10) 10-tuple"
                              ,
                     "        [T10 of 'a1 'a2 'a3 'a4 'a5 'a6 'a7 'a8 'a9 'a10])"
-                             ,
-                             ";  \\qbreak                                      "
-                             ,
-                              ";                                               "
-                             ,
-                              ";  S-expression reader                          "
-                             ,
-                              ";                                               "
-                             ,
-                          ";  To enable everyone to write more interesting uML "
-                             ,
-                      ";  programs, I define a representation of S-expressions "
-                             ,
-                      ";  in uML and a primitive that reads S-expressions from "
-                             ,
-                         ";  a file. I had hoped to extend every single bridge "
-                             ,
-                      ";  language with a little library for reading data from "
-                             ,
-                      ";  files, but there wasn't quite time. Shipping is also "
-                             ,
-                              ";  a feature.                                   "
-                             ,
-                              ";                                               "
-                             ,
-                     ";  An S-expression is a Boolean, symbol, number, or list "
-                             ,
-                             ";  of S-expressions. \\umllabelsx                "
                              , ";  <predefined uML types>=                   "
                              , "(data * sx"
                              , "   [Sx.B : (bool -> sx)]"
@@ -6597,12 +6659,11 @@ val _ = op primTyconBasis : basis
 (* well, but not quite---the abstract syntax of *)
 (* [[DEFINE]] is different.                     *)
 
-(* Function [[bind]] operates on association lists. The *)
-(* code uses only pattern matching, not [[null?]], *)
-(* [[car]], or [[cdr]]. I encourage you to compare it *)
-(* with the \nml version in \chunkrefml.chunk.bind. \ *)
-(* nwnarrowboxes \addboxumlbind : (forall ['a 'b] ('a 'b *)
-(* (list (pair 'a 'b)) -> (list (pair 'a 'b)))) *)
+(* Next, the predefined types. Internal function *)
+(* [[process]] accepts only [[data]] definitions, which *)
+(* can be checked without type inference. \     *)
+(* makenowebnotdef (from \LApredefined uML types \ *)
+(* upshape[->]\RA)                              *)
 (* <boxed values 156>=                          *)
 val _ = op predefinedTypeBasis : basis
 (* [[funty]] stand for \tau, [[actualtypes]]    *)
@@ -6689,16 +6750,11 @@ fun consubst theta =
         | subst TRIVIAL       = TRIVIAL
   in  subst
   end
-(* Adding a new binding also adds to the cache. The new *)
-(* cache is the union of the existing cache with the *)
-(* free type variables of the new type scheme sigma. \ *)
-(* nmlflabelbindtyscheme                        *)
 (* <boxed values 80>=                           *)
 val _ = op bindtyscheme : name * type_scheme * type_env -> type_env
-(* \qbreak To support a stream of marked lines—possibly *)
-(* marked, located lines—I define transformers [[eol]], *)
-(* [[inline]], and [[srcloc]]. The [[eol]] transformer *)
-(* returns the number of the line just ended.   *)
+(* Free type variables are found in the cache in *)
+(* constant time. \nmlflabelfreetyvarsGamma \   *)
+(* nwnarrowboxes                                *)
 (* <boxed values 80>=                           *)
 val _ = op freetyvarsGamma : type_env -> name set
 (* <boxed values 80>=                           *)
@@ -6714,6 +6770,11 @@ val _ = op consubst : subst -> con -> con
 fun conjoinConstraints []      = TRIVIAL
   | conjoinConstraints [c]     = c
   | conjoinConstraints (c::cs) = c /\ conjoinConstraints cs
+(* The \bigwedge{ ...} notation is implemented by ML *)
+(* function [[conjoinConstraints]]. To preserve the *)
+(* number and order of sub-constraints, it avoids using *)
+(* [[foldl]] or [[foldr]]. \nmlflabelconjoinConstraints *)
+(* \nwnarrowboxes                               *)
 (* <boxed values 81>=                           *)
 val _ = op conjoinConstraints : con list -> con
 (* <utility functions on type constraints>=     *)
@@ -6756,24 +6817,21 @@ fun untriviate (c /\ c') = (case (untriviate c, untriviate c')
 (* <boxed values 267>=                          *)
 val _ = op constraintString : con -> string
 val _ = op untriviate       : con -> con
-(* Two more utility functions are defined in \cref *)
-(* app:ml: [[constraintString]] can be used to print *)
-(* constraints, and [[untriviate]], whose type is \ *)
-(* monoboxcon -> con, removes trivial conjuncts from a *)
-(* constraint.                                  *)
+(* Now micro-Scheme primitives like [[+]] and [[*]] can *)
+(* be defined by applying first [[arithOp]] and then *)
+(* [[inExp]] to their ML counterparts.          *)
 (*                                              *)
-(* Constraint solving                           *)
-(*                                              *)
-(* If type inference is given an ill-typed program, *)
-(* it produces an unsolvable constraint. Examples of *)
-(* unsolvable constraints include int\eqtybool and list *)
-(* alpha\eqtyalpha. Given an unsolvable constraint, the *)
-(* type checker should issue a readable error message, *)
-(* not one full of machine-generated type variables. *)
-(* To do so, function [[unsatisfiableEquality]] takes *)
-(* the pair of types that can't be made equal, puts the *)
-(* pair into canonical form, and raises the     *)
-(* [[TypeError]] exception. [*]                 *)
+(* The micro-Scheme primitives are organized into a list *)
+(* of (name, function) pairs, in Noweb code chunk *)
+(* [[]].                                        *)
+(* Each primitive on the list has type \monoboxvalue *)
+(* list -> value. In \chunkrefmlscheme.inExp-applied, *)
+(* each primitive is passed to [[inExp]], and the *)
+(* results are used build micro-Scheme's initial *)
+(* environment. [Actually, the list contains all the *)
+(* primitives except one: the [[error]] primitive, which *)
+(* must not be wrapped in [[inExp]].] The list of *)
+(* primitives begins with these four elements:  *)
 (* <constraint solving>=                        *)
 fun unsatisfiableEquality (t1, t2) =
   let val t1_arrow_t2 = funtype ([t1], t2)
@@ -6850,26 +6908,12 @@ fun exhaustivenessCheck (ps, tau) =
 (* filled in when implementing uML *)
 (* <definitions of [[typeof]] and [[typdef]] for \nml\ and \uml>= *)
 fun typeof (e, Gamma) =
-  let (* Adding [[< --- >]] and [[notFollowedBy]] to our *)
-      (* library gives it the flavor of a little Boolean *)
-      (* algebra for transformers: functions [[< --- >]], *)
-      (* [[<|>]], and [[notFollowedBy]] play the roles of *)
-      (* ``and,'' ``or,'' and ``not,'' and [[pzero]] plays the *)
-      (* role of ``false.''                           *)
-      (*                                              *)
-      (* Transformers for sequences                   *)
-      (*                                              *)
-      (* Concrete syntax is full of sequences. A function *)
-      (* takes a sequence of arguments, a program is a *)
-      (* sequence of definitions, and a method definition *)
-      (* contains a sequence of expressions. To create *)
-      (* transformers that process sequences, I define *)
-      (* functions [[many]] and [[many1]]. If [[t]] is an \ *)
-      (* atob transformer, then \monoboxmany t is an \atox *)
-      (* list-of-B transformer. It runs [[t]] as many times as *)
-      (* possible. And even if [[t]] fails, \monoboxmany t *)
-      (* always succeeds: when [[t]] fails, \monoboxmany t *)
-      (* returns an empty list of B's.                *)
+  let (* Calling typesof(<\ldotsne>, Gamma) returns (<\ldotsn *)
+      (* tau>, \tyc) such that for every i from 1 to n, \ *)
+      (* nomathbreak\typeisc\tyce_i tau_i. The base case is *)
+      (* trivial; the inductive case uses this rule from *)
+      (* Section [->]:[*] \usety.TypesOfC Both cases are *)
+      (* implemented by function [[typesof]].         *)
 
 (* <shared definition of [[typesof]], to infer the types of a list of expressions>= *)
       fun typesof ([],    Gamma) = ([], TRIVIAL)
@@ -6890,8 +6934,6 @@ fun typeof (e, Gamma) =
       (* an acceptable part of the interpreter, I pretend they *)
       (* are part of the [[literal]] function.        *)
       (* <function [[literal]], to infer the type of a literal constant>= *)
-      (* When a value constructor appears in a pattern, the *)
-      (* same technique applies. [*]                  *)
       (* <definition of function [[pvconType]]>=      *)
       fun pvconType (K, Gamma) =
         freshInstance (findtyscheme (K, Gamma))
@@ -7262,6 +7304,22 @@ fun typeof (e, Gamma) =
                                            "no value constructor named " ^ vcon)
             in  (tau, TRIVIAL)
             end
+(* Type inference                               *)
+(*                                              *)
+(* Type inference builds on constraint solving. *)
+(* It comprises two functions: [[typeof]], which *)
+(* implements the typing rules for expressions, and *)
+(* [[typdef]], which implements the rules for   *)
+(* definitions.                                 *)
+(*                                              *)
+(* Type inference for expressions               *)
+(*                                              *)
+(* Given an expression e and type environment Gamma, *)
+(* function \monoboxtypeof(e, Gamma) returns a pair (tau *)
+(* , \tyc) such that \nomathbreak\typeisc\tyce tau. It *)
+(* uses internal functions [[typesof]], [[literal]], *)
+(* and [[ty]]. \nmlflabeltypeof,ty \makenowebnotdef(left *)
+(* as an exercise)                              *)
 (* <boxed values 84>=                           *)
 val _ = op typeof  : exp      * type_env -> ty      * con
 val _ = op typesof : exp list * type_env -> ty list * con
@@ -7273,14 +7331,6 @@ val _ = op ty      : exp   -> ty * con
 fun typdef (d, Gamma) =
   case d
     of VAL    (x, e)      =>
-                         (* Forms [[EXP]] and [[DEFINE]] are syntactic sugar. *)
-                             (*                                              *)
-
-                        (* The cases for [[VAL]] and [[VALREC]] resemble each *)
-
-                      (* other. A [[VAL]] computes a type and generalizes it. *)
-                             (* \usetyValC                                   *)
-
                      (* <infer and bind type for [[VAL    (x, e)]] for \nml>= *)
                              let val (tau, c) = typeof (e, Gamma)
                                  val theta    = solve c
@@ -7361,8 +7411,6 @@ fun typdef (d, Gamma) =
 (* scheme of the new binding. \nmlflabeltypdef  *)
 (* <boxed values 85>=                           *)
 val _ = op typdef : def * type_env -> type_env * string
-(* The second group of chunks implements type inference, *)
-(* and it is shared by both \nml and uML.       *)
 (* <boxed values 266>=                          *)
 val _ = op typeof  : exp * type_env -> ty * con
 val _ = op typdef : def * type_env -> type_env * string
@@ -7444,14 +7492,190 @@ fun eval (e, rho) =
         | ev (CASE (LITERAL v, 
                         (p, e) :: choices)) =
             (let val rho' = match (p, v)
+
+(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
+        (* \newskip\myskip \myskip=6pt                  *)
+        (*                                              *)
+        (*    Type system    Concept       Interpreter  *)
+        (*         d         Definition    def (\cpagerefadt.type.def) *)
+        (*         e         Expression    \umltypeexp  *)
+        (*         t         Type syntax   \umltypetyex *)
+        (*         x         Variable      \mlstypename *)
+        (*       \avcon      Value         \umltypevcon *)
+        (*                   constructor                *)
+        (*         p         Pattern       \umltypepat  *)
+        (*    [\myskip] \    Syntactic                  *)
+        (*       stycon      type name                  *)
+        (*       alpha       Type variable \nmltypetyvar *)
+        (*         µ         Type          \umltypetycon *)
+        (*                   constructor                *)
+        (*     \atyconset    Set of type   Hidden inside \umlfun *)
+        (*                   constructors  freshTycon   *)
+        (*        tau        Type          \nmltypety   *)
+        (*  sigma, \/alpha.  Type scheme   [[type_scheme]] \nmltypepage *)
+        (*        tau                      type_scheme  *)
+        (*  [\myskip] Gamma  Type          [[type_env]] \nmltypepage *)
+        (*                   environment   type_env     *)
+        (*   Gamma_1 \uplus  Disjoint      \umlfundisjointUnion *)
+        (*      Gamma_2      union                      *)
+        (*   Gamma+ Gamma'   Extension     \mlsfun<+>   *)
+        (*   [\myskip] \tyc  Constraint    \nmltypecon  *)
+        (*  tau_1 \eqtytau_2 Equality      tau_1 [[ ]] tau_2 \ *)
+        (*                   constraint    nmlfunpagetilde *)
+        (*  \tyc_1 \land\tyc Conjunction   \tyc_1 [[/] \tyc_2 \ *)
+        (*         _2                      nmlfunpagecand *)
+        (*       \trivc      Trivial       \nmlfunTRIVIAL *)
+        (*                   constraint                 *)
+        (*     \bigwedge\    Conjunction   \monoconjoinConstraints [\ *)
+        (*  nolimits_i \tyc                ldotsn\tyc] \nmlfunpage *)
+        (*         _i                      conjoinConstraints *)
+        (*    [\myskip] \    Type          \umlfuntxType *)
+        (*    txTypet tau\   elaboration                *)
+        (*       akind                                  *)
+        (*  \vconcompatsigma Type          \umlfunvalidate *)
+        (*      µ\akind      compatibility             *)
+        (*    [\myskip] \    Type          \monoboxty e = (tau, \tyc) ( *)
+        (*  typeisc\tyce tau inference     \chunkrefadt.chunk.ty-case) *)
+        (*   \typeisc\tyc\   Type          \monoboxchoicetype((p, e),  *)
+        (*  choicep e tau--> inference     Gamma) = \break\qquad\ *)
+        (*        tau'                     nomathbreak(tau-->tau', \tyc *)
+        (*                                 ) \umlfunpagechoicetype *)
+        (*  \pattypeisc\tycp Type          \monoboxpattype(p, Gamma) = *)
+        (*     Gamma' tau    inference     (Gamma', tau, \tyc) \ *)
+        (*                                 umlfunpagepattype *)
+        (*                   Type          \monoboxtypdef(d, Gamma) = \ *)
+        (*  [\myskip] \toptd inference     monobox(Gamma', s) \ *)
+        (*     -->Gamma'                   nmlfunpagetypdef and also \ *)
+        (*                                 umlfuntypeDataDef *)
+        (*                                              *)
+        (* [*]                                          *)
+
+(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
+        (*                                              *)
+        (* Theory and \chaptocsplitimplementation \     *)
+        (* maintocsplitof \chaptocsplitcase expressions *)
+        (*                                              *)
+        (* [*] The operational semantics and type theory of *)
+        (* pattern matching apply to any language with  *)
+        (* pattern-matching case expressions.           *)
+        (*                                              *)
+        (* Evaluation of case expressions and pattern matching *)
+        (*                                              *)
+        (* [*] As illustrated in \                      *)
+        (* crefadt.case-evaluation-by-example, a case expression *)
+        (* is evaluated by trying one choice after another, *)
+        (* selecting the first choice whose pattern matches the *)
+        (* scrutinee. If an attempt at pattern matching succeeds *)
+        (* , it produces an environment rho', which binds the *)
+        (* variables that appear in the pattern. If the attempt *)
+        (* at pattern matching fails, I say it produces \FAIL *)
+        (* (pronounced ``failure,'' but think of a dagger in the *)
+        (* heart). The \FAIL is not an environment or a value or *)
+        (* an expression or anything we have encountered before; *)
+        (* it is a new symbol that means pattern-match failure. *)
+        (* To stand for the result of a pattern match, which is *)
+        (* either an environment rho' or \FAIL, I use the *)
+        (* metavariable \matchresult. The matching judgment *)
+        (* therefore takes the form \jform[uml.eval.match]\ *)
+        (* patmatchesp v \matchresult:                  *)
+        (*                                              *)
+        (*  \patmatchesp  Pattern p matches value v,    *)
+        (*  v rho'        producing bindings rho';      *)
+        (*  \patfailsp v  Pattern p does not match value v. *)
+        (*                                              *)
+        (* Since patterns are matched only in the context of a *)
+        (* case expression, understanding of pattern matching *)
+        (* begins with case expressions.                *)
+        (*                                              *)
+        (* A case expression is evaluated by first evaluating *)
+        (* the scrutinee e, which involves no pattern matching. *)
+        (* Once e is evaluated to produce a value v, the *)
+        (* operational semantics puts v back into the scrutinee *)
+        (* position as a literal expression. This trick avoids *)
+        (* the need for a special form of judgment that would *)
+        (* otherwise try to match v with each choice in turn. *)
+        (* The trick is implemented by this rule: \     *)
+        (* jlabeluml.eval.exp<e, rho> ==>v \qops. CaseScrutinee *)
+        (* \evale ==>v \eval\xcase(\xliteral(v), \achoice[_1], *)
+        (* ..., \achoice[_n]) ==>v' \eval\xcase(e, \achoice[_1], *)
+        (* ..., \achoice[_n]) ==>v' Once the scrutinee is a *)
+        (* literal v, pattern matching can begin.       *)
+        (*                                              *)
+        (* The value of the scrutinee is always matched against *)
+        (* the first pattern p_1. If that match succeeds, *)
+        (* producing environment rho', \qbreak the value of the *)
+        (* case expression is the value produced by evaluating *)
+        (* the corresponding right-hand side e_1 in the extended *)
+        (* environment rho+ rho'. \qops CaseMatch \patmatchesp_1 *)
+        (* v rho' \eval[+rho'] e_1 ==>v' \eval\xcase(\xliteral *)
+        (* (v), \achoice[_1], ..., \achoice[_n]) ==>v' [*] The *)
+        (* extension rho+rho' is defined for any two    *)
+        (* environments rho and rho'; environment rho is *)
+        (* extended by adding rho''s bindings to it. {align*} *)
+        (* dom (rho+ rho') --- = dom rho\cupdom rho'    *)
+        (* (rho+ rho')(x) --- = {                       *)
+        (*                                              *)
+        (* rho'(x), if x in dom rho'                    *)
+        (* rho(x), if x \notindom rho'                  *)
+        (*                                              *)
+        (* . {align*} The + operation can also express an *)
+        (* environment extended with bindings:          *)
+        (*                                              *)
+        (*  rho{\ldotsmapstonx v}= rho+ {\ldotsmapstonx v}\ *)
+        (*  text.                                       *)
+        (*                                              *)
+        (* Back to the case expression: what if the first *)
+        (* pattern doesn't match? Evaluation continues with the *)
+        (* next pattern. The operational semantics drops choice *)
+        (* \choicep_1e_1 from the case expression, and  *)
+        (* it evaluates a new case expression whose first choice *)
+        (* is \choicep_2e_2: \qops. CaseFail \patfailsp_1 v \ *)
+        (* eval\xcase(\xliteral(v), \achoice[_2], ..., \achoice *)
+        (* [_n]) ==>v' \eval\xcase(\xliteral(v), \achoice[_1], *)
+        (* ..., \achoice[_n]) ==>v' What if there are no more *)
+        (* choices—that is, what if n=1? Then no rule applies. *)
+        (* The operational semantics gets stuck, and the *)
+        (* interpreter raises the [[RuntimeError]] exception. *)
+        (*                                              *)
+
+(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
+        (* \newskip\myskip \myskip=6pt                  *)
+        (*                                              *)
+        (*     Semantics     Concept     Interpreter    *)
+        (*         e         Expression  \umltypeexp    *)
+        (*         x         Variable    \mlstypename   *)
+        (*       \avcon      Value       \umltypevcon   *)
+        (*                   constructor                *)
+        (*         p         Pattern     \umltypepat    *)
+        (*         v         Value       \umltypevalue  *)
+        (*  [\myskip] rho+   Extension   \mlsfun<+>     *)
+        (*        rho'                                  *)
+        (*  rho_1 \uplusrho  Disjoint    \umlfundisjointUnion *)
+        (*         _2        union                      *)
+        (*    [\myskip] \    Pattern     match(p, v) = rho' \ *)
+        (*   patmatchesp v   matches     umlfunpagematch *)
+        (*        rho'                                  *)
+        (*    \patfailsp v   Pattern     match(p, v) raises *)
+        (*                   match fails [[Doesn'tMatch]] *)
+        (*                                              *)
+        (* [*]                                          *)
+
+(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
+        (*                                              *)
+        (* Each rule is implemented as a clause for function  *)
+        (* [[ev]]. To avoid an infinite loop, the clauses for \ *)
+        (* xcase(\xliteral(v), cs) must precede the clause for \ *)
+        (* xcase(e, cs). The matching judgment is implemented by *)
+        (* function [[match]]: if matching succeeds, it returns  *)
+        (* rho', and if not, it raises the exception    *)
+        (* [[Doesn'tMatch]]. In that case it's time to try the *)
+        (* remaining choices. \umlflabelev              *)
         (* <boxed values 146>=                          *)
         val _ = op match : pat * value -> value env
         val _ = op <+>   : 'a env * 'a env -> 'a env
              in  eval (e, rho <+> rho')
              end
              handle Doesn'tMatch => ev (CASE (LITERAL v, choices)))
-        (* If no choices match a [[LITERAL]] form, then the case *)
-        (* expression does not match.                   *)
         (* <more alternatives for [[ev]] for \nml\ and \uml>= *)
         | ev (CASE (LITERAL v, [])) =
             raise RuntimeError ("'case' does not match " ^ valueString v)
@@ -7463,22 +7687,6 @@ fun eval (e, rho) =
         (* <more alternatives for [[ev]] for \nml\ and \uml>= *)
         | ev (CASE (e, choices)) =
             ev (CASE (LITERAL (ev e), choices))
-        (* \qbreak                                      *)
-        (*                                              *)
-        (* Evaluation                                   *)
-        (*                                              *)
-        (* For syntactic forms other than the [[case]] and *)
-        (* [[data]] forms, uML shares its operational semantics *)
-        (* and its implementations of [[eval]] and [[ev]] with \ *)
-        (* nml. uML adds rules for case expressions, pattern *)
-        (* matching, and the [[data]] definition. All those *)
-        (* rules are implemented by code that is shown in \cref *)
-        (* adt.chap. The only case not implemented in \cref *)
-        (* adt.chap is uML's special syntax for a       *)
-        (* value-constructor expression. Its implementation *)
-        (* isn't interesting: like a value variable, a value *)
-        (* constructor is evaluated by looking it up in the *)
-        (* environment:                                 *)
         (* <more alternatives for [[ev]] for \nml\ and \uml>= *)
         | ev (VCONX vcon) = find (vcon, rho)
         (* \xlet evaluates all right-hand sides in rho, then *)
@@ -7495,14 +7703,6 @@ fun eval (e, rho) =
             let fun step ((x, e), rho) = bind (x, eval (e, rho), rho)
             in  eval (body, foldl step rho bs)
             end
-        (* \xletrec is the most interesting case. Function *)
-        (* [[makeRho']] builds an environment in which each *)
-        (* right-hand side stands for a closure. Each closure's *)
-        (* captured environment is the one built by     *)
-        (* [[makeRho']]. The recursion is OK because the *)
-        (* environment is built lazily, so [[makeRho']] always *)
-        (* terminates. The parser guarantees that the right-hand *)
-        (* sides are lambda abstractions. [*]           *)
         (* <more alternatives for [[ev]] for \nml\ and \uml>= *)
         | ev (LETX (LETREC, bs, body)) =
             let fun asLambda (LAMBDA l) = l
@@ -7591,19 +7791,6 @@ fun processDef (DATA dd, basis, interactivity) =
               println (valstring ^ " : " ^ tystring)
             else
               ()
-(* As in other interpreters for statically typed *)
-(* languages, [[processDef]] first typechecks a *)
-(* definition, then evaluates it. A data definition is *)
-(* handled by function [[processDataDef]] below. All *)
-(* other definitions are handled by the versions of *)
-(* [[typdef]] and [[evaldef]] defined for \nml in \cref *)
-(* ml.chap. The basis for \nml lacks a kind environment  *)
-(* Delta, so in the formal system, the uML type system *)
-(* uses \nml's rules by invoking this rule: \tyrule *)
-(* ReuseDefinition \nmlelabdefd Gamma' \umlelabdefd *)
-(* Gamma',Delta,\atyconset                      *)
-(*                                              *)
-(* [*]                                          *)
 (* <boxed values 153>=                          *)
 val _ = op processDef : def * basis * interactivity -> basis
       in  (Gamma', Delta, rho')
@@ -7634,11 +7821,6 @@ fun withHandlers f a caught =
        (* These exception handlers are used in all the *)
        (* bridge-language interpreters.                *)
 
-       (* The read-eval-print loop is almost identical to the *)
-       (* read-eval-print loop for Typed uScheme*; the only *)
-       (* difference is that instead of a handler for  *)
-       (* [[BugInTypeChecking]], it has a handler for  *)
-       (* [[BugInTypeInference]].                      *)
 
 (* <other handlers that catch non-fatal exceptions and pass messages to [[caught]] ((type-inference))>= *)
        | TypeError          msg => caught ("type error <at loc>: " ^ msg)
@@ -7646,9 +7828,6 @@ fun withHandlers f a caught =
 (* <shared unit-testing utilities>=             *)
 fun failtest strings = 
   (app eprint strings; eprint "\n"; false)
-(* The [[failtest]] used to write the error messages, *)
-(* which always returns [[false]], is defined as *)
-(* follows:                                     *)
 (* <boxed values 105>=                          *)
 val _ = op failtest : string list -> bool
 (* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
@@ -7693,12 +7872,14 @@ fun reportTestResultsOf what (npassed, nthings) =
               app print [intString npassed, " of ", intString nthings,
                           " " ^ what ^ "s passed.\n"]
 val reportTestResults = reportTestResultsOf "test"
-(* \qvfilbreak2in                               *)
-(*                                              *)
-(* Unit testing                                 *)
-(*                                              *)
-(* Unit testing is as in \nml, except that types in the *)
-(* syntax have to be translated.                *)
+(* A transformer can be complemented, turning success *)
+(* into failure and vice versa. Transformer \monobox *)
+(* notFollowedBy t succeeds if and only if [[t]] fails. *)
+(* Transformer \monoboxnotFollowedBy t may look at *)
+(* input, but it never consumes any input. This *)
+(* transformer is used when trying to read an integer *)
+(* literal, to make sure that the digits are not *)
+(* followed by a letter or other non-delimiting symbol. *)
 (* <definition of [[testIsGood]] for \uml>=     *)
 (* <definition of [[skolemTypes]] for languages with generated type constructors>= *)
 val skolemTypes =
@@ -7806,7 +7987,6 @@ fun testIsGood (test, (Gamma, Delta, rho)) =
         handle TypeError msg =>
           failtest ["In (", form, " ", expString e, " ",
                     tyexString sigmax, "), ", msg]
-(* \qbreak A good test has to typecheck.        *)
 (* <definition of [[testIsGood]] for \uml>=     *)
       val checkTxTypeChecks =
         withTranslatedSigma (checkTypeChecks "check-type") "check-type"
@@ -7838,8 +8018,6 @@ fun testIsGood (test, (Gamma, Delta, rho)) =
       (* applied to zero or more syntactic values.    *)
       (* <boxed values 159>=                          *)
       val _ = op asSyntacticValue : exp -> value option
-      (* All three functions are stitched together, using a *)
-      (* language-dependent [[testEquals]].           *)
 
     (* <shared [[check{Expect,Assert,Error}Passes]], which call [[outcome]]>= *)
       (* <shared [[whatWasExpected]]>=                *)
@@ -7925,6 +8103,8 @@ fun testIsGood (test, (Gamma, Delta, rho)) =
                    failtest [cafailed, " expected assertion ", expString checkx,
                              " to hold, but evaluating it caused this error: ",
                                                                             msg]
+      (* \qtrim1 Function [[checkAssertPasses]] does the *)
+      (* analogous job for [[check-assert]].          *)
       (* <boxed values 103>=                          *)
       val _ = op checkAssertPasses : exp -> bool
 
@@ -8017,110 +8197,16 @@ fun assertPtype (x, t, (Gamma, Delta, _)) =
 fun processTests (tests, rho) =
       reportTestResults (numberOfGoodTests (tests, rho), length tests)
 and numberOfGoodTests (tests, rho) =
-  foldr (fn (t, n) => if testIsGood (t, rho) then n + 1 else n) 0 tests
-(* The stream-transformer abstraction supports many, *)
-(* many operations. These operations, known as parsing *)
-(* combinators, have been refined by functional *)
-(* programmers for over two decades, and they can be *)
-(* expressed in a variety of guises. The guise I have *)
-(* chosen uses notation from applicative functors and *)
-(* from the ParSec parsing library.             *)
-(*                                              *)
-(* I begin very abstractly, by presenting combinators *)
-(* that don't actually consume any inputs. The next two *)
-(* sections present only ``constant'' transformers and *)
-(* ``glue'' functions that build transformers from other *)
-(* transformers. With those functions in place, *)
-(* I proceed to real, working parsing combinators. These *)
-(* combinators are split into two groups: ``universal'' *)
-(* combinators that work with any stream, and   *)
-(* ``parsing'' combinators that expect a stream of *)
-(* tokens with source-code locations.           *)
-(*                                              *)
-(* My design includes a lot of combinators. Too many, *)
-(* really. I would love to simplify the design, but *)
-(* simplifying software can be hard, and I don't want to *)
-(* delay the book by another year.              *)
-(*                                              *)
-(* --- #2                                       *)
-(* \newskip\myskip \myskip=4pt                  *)
-(*                                              *)
-(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
-(* \catcode`=\other \catcode`_=\other \catcode`$=\other *)
-(*                                              *)
-(*  Stream transformers; applying functions to  *)
-(*  transformers                                *)
-(*  \type('a, 'b) xformer \                     *)
-(*  tableboxpure : 'b -> ('a, 'b)               *)
-(*  xformer \splitbox<*>('a, 'b ->              *)
-(*  'c) xformer * ('a, 'b)                      *)
-(*  xformer-> ('a, 'c) xformer \                *)
-(*  tablebox<> : ('b -> 'c) * ('a,              *)
-(*  'b) xformer -> ('a, 'c)                     *)
-(*  xformer \tablebox<>? : ('b ->               *)
-(*  'c option) * ('a, 'b) xformer               *)
-(*  -> ('a, 'c) xformer \splitbox               *)
-(*  <*>!('a, 'b -> 'c error)                    *)
-(*  xformer * ('a, 'b) xformer->                *)
-(*  ('a, 'c) xformer \tablebox<>!               *)
-(*  : ('b -> 'c error) * ('a, 'b)               *)
-(*  xformer -> ('a, 'c) xformer                 *)
-(*  [8pt] Functions useful with                 *)
-(*  [[<>]] and [[<*>]]                          *)
-(*  \tableboxfst : ('a * 'b) -> 'a              *)
-(*  \tableboxsnd : ('a * 'b) -> 'b              *)
-(*  \tableboxpair : 'a -> 'b -> 'a              *)
-(*  * 'b \tableboxcurry : ('a * 'b              *)
-(*  -> 'c) -> ('a -> 'b -> 'c) \                *)
-(*  tableboxcurry3 : ('a * 'b * 'c              *)
-(*  -> 'd) -> ('a -> 'b -> 'c ->                *)
-(*  'd) [8pt] Combining                         *)
-(*  transformers in sequence,                   *)
-(*  alternation, or conjunction                 *)
-(*  \tablebox<* : ('a, 'b) xformer >]] : ('a, 'b) *)
-(*  * ('a, 'c) xformer -> ('a, 'b) xformer * ('a, 'c) *)
-(*  xformer \tablebox *> : ('a,    xformer -> ('a, *)
-(*  'b) xformer * ('a, 'c) xformer 'c) xformer [8pt] *)
-(*  -> ('a, 'c) xformer \tablebox< Transformers *)
-(*  : 'b * ('a, 'c) xformer ->     useful for both *)
-(*  ('a, 'b) xformer \tablebox<|>  lexical analysis *)
-(*  : ('a, 'b) xformer * ('a, 'b)  and parsing  *)
-(*  xformer -> ('a, 'b) xformer \               *)
-(*  tableboxpzero : ('a, 'b)                    *)
-(*  xformer \tableboxanyParser :                *)
-(*  ('a, 'b) xformer list -> ('a,               *)
-(*  'b) xformer \tablebox[[<                    *)
-(*  \tableboxone : ('a, 'a)                     *)
-(*  xformer \tableboxeos : ('a,                 *)
-(*  unit) xformer \tableboxsat :                *)
-(*  ('b -> bool) -> ('a, 'b)                    *)
-(*  xformer -> ('a, 'b) xformer \               *)
-(*  tableboxeqx : ''b -> ('a, ''b)              *)
-(*  xformer -> ('a, ''b) xformer                *)
-(*  notFollowedBy                               *)
-(*                                 ('a, 'b) xformer *)
-(*                                 -> ('a, unit) *)
-(*                                 xformer      *)
-(*  \tableboxmany : ('a, 'b)                    *)
-(*  xformer -> ('a, 'b list)                    *)
-(*  xformer \tableboxmany1 : ('a,               *)
-(*  'b) xformer -> ('a, 'b list)                *)
-(*  xformer \tableboxoptional :                 *)
-(*  ('a, 'b) xformer -> ('a, 'b                 *)
-(*  option) xformer \tableboxpeek               *)
-(*  : ('a, 'b) xformer -> 'a                    *)
-(*  stream -> 'b option \tablebox               *)
-(*  rewind : ('a, 'b) xformer ->                *)
-(*  ('a, 'b) xformer                            *)
-(*                                              *)
-(* Stream transformers and their combinators [*] *)
-(* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ *)
-(*                                              *)
-(* Error-free transformers and their composition *)
-(*                                              *)
-(* The [[pure]] combinator takes a value [[y]] of type B *)
-(* as argument. It returns an \atob transformer that *)
-(* consumes no A's as input and produces [[y]]. *)
+      let val testIsGood = fn args => (resetComputationLimits (); testIsGood
+                                                               args) in (*OMIT*)
+      foldr (fn (t, n) => if testIsGood (t, rho) then n + 1 else n) 0 tests
+      end
+                                                                                
+                                                                        (*OMIT*)
+(* \qbreak Function [[processTests]] is shared among all *)
+(* bridge languages. For each test, it calls the *)
+(* language-dependent [[testIsGood]], adds up the number *)
+(* of good tests, and reports the result. [*]   *)
 (* <boxed values 106>=                          *)
 val _ = op processTests : unit_test list * basis -> unit
 (* <shared read-eval-print loop>=               *)
@@ -8144,7 +8230,7 @@ fun readEvalPrintWith errmsg (xdefs, basis, interactivity) =
               | try (DEFS ds)      = foldl processXDef basis (map DEF ds)
                                                                         (*OMIT*)
             fun caught msg = (errmsg (stripAtLoc msg); basis)
-            val _ = resetComputationLimits ()     (* OMIT *)
+            val () = resetComputationLimits ()     (* OMIT *)
         in  withHandlers try xd caught
         end 
       (* The extended-definition forms [[USE]] and [[TEST]] *)
@@ -8204,50 +8290,13 @@ val _ = op processTests : unit_test list * basis -> unit
 val _ = op readEvalPrintWith : (string -> unit) ->                     xdef
                                          stream * basis * interactivity -> basis
 val _ = op processXDef       : xdef * basis -> basis
+(* The [[Located]] exception is raised by function *)
+(* [[atLoc]]. Calling \monoboxatLoc f x applies [[f]] *)
+(* to [[x]] within the scope of handlers that convert *)
+(* recognized exceptions to the [[Located]] exception: *)
+
   in  basis
   end
-(* Function [[readEvalPrintWith]] executes essentially *)
-(* the same imperative actions as the C function *)
-(* [[readevalprint]] (\chunkref                 *)
-(* scheme.chunk.readevalprint): allocate space for a *)
-(* list of pending unit tests; loop through a stream of *)
-(* extended definitions, using each one to update the *)
-(* environment(s); and process the pending unit tests. *)
-(* (The looping action in the ML code is implemented by *)
-(* function [[streamFold]], which applies       *)
-(* [[processXDef]] to every element of [[xdefs]]. *)
-(* Function [[streamFold]] is the stream analog of the *)
-(* list function [[foldl]].) Unlike the C       *)
-(* [[readevalprint]], which updates the environment *)
-(* in place by writing through a pointer, the   *)
-(* ML function ends by returning a new basis, which *)
-(* contains the updated environment(s).         *)
-(*                                              *)
-(* Please pause and look at the names of the functions. *)
-(* Functions [[eval]] and [[evaldef]] are named after a *)
-(* specific, technical action: they evaluate. But *)
-(* functions [[processDef]], [[processXDef]], and *)
-(* [[processTests]] are named after a vague action: they *)
-(* process. I've chosen this vague word deliberately, *)
-(* because the ``processing'' is different in different *)
-(* languages:                                   *)
-(*                                              *)
-(*   • In an untyped language like micro-Scheme or *)
-(*  uSmalltalk, ``process'' means ``evaluate.'' *)
-(*   • In a typed language like Typed Impcore, Typed *)
-(*  uScheme, \nml, or uML, ``process'' means ``first *)
-(*  typecheck, then evaluate.''                 *)
-(*                                              *)
-(* Using the vague word ``process'' to cover both *)
-(* language families helps me write generic code that *)
-(* works with both language families.           *)
-(*                                              *)
-(* \qbreak Let's see the generic code that ``processes'' *)
-(* an extended definition. To process a [[USE]] form, *)
-(* [[processXDef]] calls function [[useFile]], which *)
-(* reads definitions from a file and recursively passes *)
-(* them to [[readEvalPrintWith]].               *)
-
 
 
 
@@ -8257,6 +8306,10 @@ val _ = op processXDef       : xdef * basis -> basis
 (*                                                               *)
 (*****************************************************************)
 
+(* To complete the construction of the initial basis, *)
+(* the next step is to add the primitive functions. \ *)
+(* makenowebnotdef (from \LApredefined uML functions \ *)
+(* upshape[->]\RA)                              *)
 (* <implementations of \uml\ primitives and definition of [[initialBasis]]>= *)
 (* <shared utility functions for building primitives in languages with type inference>= *)
 fun binaryOp f = (fn [a, b] => f (a, b)
@@ -8268,20 +8321,9 @@ fun arithOp f =
       binaryOp (fn (NUM n1, NUM n2) => NUM (f (n1, n2)) 
                  | _ => raise BugInTypeInference "arithmetic on non-numbers")
 val arithtype = funtype ([inttype, inttype], inttype)
-(* Primitive functions, predefined functions, and the *)
-(* initial basis                                *)
-(*                                              *)
-(* Primitives                                   *)
-(*                                              *)
-(* The utility functions [[unaryOp]] and [[binaryOp]] *)
-(* have to be redefined yet again, because if a *)
-(* primitive is called with the wrong number of *)
-(* arguments, they must raise [[BugInTypeInference]], *)
-(* not [[BugInTypeChecking]] or [[RuntimeError]]. *)
 (* <boxed values 269>=                          *)
 val _ = op unaryOp  : (value         -> value) -> (value list -> value)
 val _ = op binaryOp : (value * value -> value) -> (value list -> value)
-(* Arithmetic primitives expect and return integers. *)
 (* <boxed values 269>=                          *)
 val _ = op arithOp   : (int * int -> int) -> (value list -> value)
 val _ = op arithtype : ty
@@ -8320,10 +8362,6 @@ val primFunBasis =
                                          ("error", unaryOp (fn v => raise
                                                   RuntimeError (valueString v)),
                                                    funtype ([alpha], beta)) ::
-
-                         (* The [[read]] primitive uses the parser to build a *)
-
-                       (* list containing the S-expressions read from a file. *)
 
                               (* <primitives for \nml\ and \uml\ [[::]]>=     *)
                                          ("read", unaryOp (fn (SYM s) =>
@@ -8379,11 +8417,6 @@ val primFunBasis =
                                                         funtype ([inttype],
                                                               unittype)) :: nil)
   end
-(* \qbreak And the final step is to add the predefined *)
-(* functions. At this point all of type inference is *)
-(* available, so the construction of the basis can be *)
-(* completed using [[readEvalPrintWith]], which calls *)
-(* [[processDef]].                              *)
 (* <implementations of \uml\ primitives and definition of [[initialBasis]]>= *)
 val initialBasis =
   let val predefinedFuns =
@@ -8391,8 +8424,8 @@ val initialBasis =
          [ ";  <predefined uML functions>=               "
          , "(define null? (xs)"
          , "   (case xs"
-         , "      [(cons y ys) #t]"
-         , "      ['()         #f]))"
+         , "      [(cons y ys) #f]"
+         , "      ['()         #t]))"
          , ";;unboxuml"
          , ";  A fold function for a binary search tree is part of \\ "
          , ";  crefadt.ex.bst.                              "
@@ -8407,10 +8440,11 @@ val initialBasis =
          , ";  <predefined uML functions>=               "
          , "(data (* * => *) pair"
          , "  [PAIR : (forall ['a 'b] ('a 'b -> (pair 'a 'b)))])"
-         , ";  Using this definition, functions [[pair]], [[fst]], "
-         , ";  and [[snd]] don't have to be implemented as  "
-         , ";  primitives the way they do in \\nml; they are defined "
-         , ";  using ordinary user code:                    "
+         , ";  Now you modify [[pre-cast]] by supplying an identity "
+         , ";  function in the right place (\\creftuscheme.ex.capture "
+         , ";  again). Use [[flip-apply]] to define a function "
+         , ";  [[cast]] of type \\nomathbreak\\/alpha,beta\\alldotalpha "
+         , ";  -->beta:                                     "
          , ";  <predefined uML functions>=               "
          , "(val pair PAIR)"
          , "(define fst (p)"
@@ -8426,15 +8460,15 @@ val initialBasis =
          , "      (if (< n2 n1) GREATER"
          , "          EQUAL)))"
          , ";;unboxuml"
-         , ";  \\qbreak To apply a function, the evaluator builds an "
-         , ";  environment in which the function's body can be "
-         , ";  evaluated.. It strips the types off the formals and "
-         , ";  it puts the actuals in mutable reference cells. The "
-         , ";  number of actuals should be the same as the number of "
-         , ";  formals, or the call would have been rejected by the "
-         , ";  type checker. If the number isn't the same, the "
-         , ";  evaluator catches exception [[BindListLength]] and "
-         , ";  raises [[BugInTypeChecking]].                "
+         , ";  Pattern matching in predefined functions     "
+         , ";                                               "
+         , ";  In micro-Scheme and \\nml, list values are built in, "
+         , ";  so the basic list functions must be built in as "
+         , ";  primitives. In uML, the basic list functions are "
+         , ";  user-defined. \\addboxumlnull? : (forall ['a] ((list "
+         , ";  'a) -> bool)) \\addboxumlcar : (forall ['a] ((list 'a) "
+         , ";  -> 'a)) \\addboxumlcdr : (forall ['a] ((list 'a) -> "
+         , ";  (list 'a)))                                  "
          , ";  <predefined uML functions>=               "
          , "(define null? (xs)"
          , "   (case xs ['()        #t]"
@@ -8472,6 +8506,14 @@ val initialBasis =
          , "            (cons (pair x y) ps)"
          , "            (cons p (bind x y ps)))]))"
          , ";;unboxuml"
+         , ";  Functions [[find]] and [[bound?]] also improve on "
+         , ";  their \\nml versions. When a key is not found, "
+         , ";  [[find]] needn't call [[error]]; it can instead "
+         , ";  return a value of [[option]] type. Using nested "
+         , ";  patterns, [[find]] can be implemented without using "
+         , ";  [[fst]] or [[snd]]. \\nwnarrowboxes \\addboxumlfind : "
+         , ";  (forall ['a 'b] ('a (list (pair 'a 'b)) -> (option "
+         , ";  'b)))                                        "
          , ";  <predefined uML functions>=               "
          , "(define find (x alist)"
          , "  (case alist"
@@ -8481,10 +8523,6 @@ val initialBasis =
          , "              (SOME value)"
          , "              (find x pairs))]))"
          , ";;unboxuml"
-         , ";  \\qbreak In \\nml, [[bound?]] must reimplement the same "
-         , ";  search algorithm used in [[find]]. But in uML, "
-         , ";  [[bound?]] simply calls [[find]]. \\addboxumlbound? : "
-         , ";  (forall ['a 'b] ('a (list (pair 'a 'b)) -> bool)) "
          , ";  <predefined uML functions>=               "
          , "(define bound? (x alist)"
          , "  (case (find x alist)"
@@ -8510,10 +8548,6 @@ val initialBasis =
          , "(define caar (xs) (car (car xs)))"
          , "(define cadr (xs) (car (cdr xs)))"
          , "(define cdar (xs) (cdr (car xs)))"
-         , ";  The predefined list functions are written using "
-         , ";  pattern matching. That makes their code simpler than "
-         , ";  the corresponding functions in \\nml. Try comparing "
-         , ";  this code with the code in \\crefpage(mla.basis. "
          , ";  <predefined uML functions>=               "
          , "(define filter (p? xs)"
          , "  (case xs"
@@ -8605,8 +8639,6 @@ val primitiveBasis : basis = (* a mockup, but it's the truth *)
         ((* <primitives for \nml\ and \uml\ [[::]]>=     *)
          ("error", unaryOp (fn v => raise RuntimeError (valueString v)),
                    funtype ([alpha], beta)) ::
-         (* The [[read]] primitive uses the parser to build a *)
-         (* list containing the S-expressions read from a file. *)
          (* <primitives for \nml\ and \uml\ [[::]]>=     *)
          ("read", unaryOp (fn (SYM s) =>
                                 let val fd = TextIO.openIn s
@@ -8739,20 +8771,20 @@ fun runPathWith interactivity ("-", basis) =
       in  runStream path fd interactivity basis
           before TextIO.closeIn fd
       end 
-(* (Function [[runStream]] gets its own code chunk *)
-(* because the \usm interpreter needs a slightly *)
-(* different version.)                          *)
-(*                                              *)
-(* If files are named on a command line, each file is *)
-(* passed to function [[runPathWith]]. This function *)
-(* opens the named file and calls [[runStream]]. And in *)
-(* a special hack, relatively common on Unix systems, *)
-(* the name [[-]] stands for standard input.    *)
-(*                                              *)
 (* <boxed values 135>=                          *)
 val _ = op runPathWith : interactivity -> (string * basis -> basis)
 (* <look at command-line arguments, then run>=  *)
 val usage = ref (fn () => ())
+(* If an interpreter doesn't recognize a command-line *)
+(* option, it can print a usage message. A usage-message *)
+(* function needs to know the available options, but *)
+(* each available option is associated with a function *)
+(* that performs an action, and if something goes wrong, *)
+(* the action function might need to call the usage *)
+(* function. I resolve this mutual recursion by first *)
+(* allocating a mutual cell to hold the usage function, *)
+(* then updating it later. This is also how [[letrec]] *)
+(* is implemented in micro-Scheme.              *)
 (* <boxed values 136>=                          *)
 val _ = op usage : (unit -> unit) ref
 (* \qbreak To represent actions that might be called for *)
@@ -8776,8 +8808,21 @@ fun perform (RUN_WITH interactivity, []) =
   | perform (DUMP go, _ :: _) = perform (FAIL "Dump options take no files", [])
   | perform (FAIL msg, _)     = (eprintln msg; !usage())
   | perform (DEFAULT, args)   = perform (default_action, args)
-(* An action is performed by function [[perform]]. *)
-(* Not every action makes sense with arguments. *)
+(* Now micro-Scheme primitives like [[+]] and [[*]] can *)
+(* be defined by applying first [[arithOp]] and then *)
+(* [[inExp]] to their ML counterparts.          *)
+(*                                              *)
+(* The micro-Scheme primitives are organized into a list *)
+(* of (name, function) pairs, in Noweb code chunk *)
+(* [[]].                                        *)
+(* Each primitive on the list has type \monoboxvalue *)
+(* list -> value. In \chunkrefmlscheme.inExp-applied, *)
+(* each primitive is passed to [[inExp]], and the *)
+(* results are used build micro-Scheme's initial *)
+(* environment. [Actually, the list contains all the *)
+(* primitives except one: the [[error]] primitive, which *)
+(* must not be wrapped in [[inExp]].] The list of *)
+(* primitives begins with these four elements:  *)
 (* <boxed values 137>=                          *)
 val _ = op perform: action * string list -> unit
 (* <look at command-line arguments, then run>=  *)
@@ -8788,15 +8833,6 @@ fun merge (_, a as FAIL _) = a
   | merge (RUN_WITH _, right as RUN_WITH _) = right
   | merge (DUMP f, DUMP g) = DUMP (g o f)
   | merge (_, r) = FAIL "Interpret or dump, but don't try to do both"
-(* When command-line options call for multiple actions, *)
-(* those actions are merged by function [[merge]]. *)
-(* Options are processed left to right, and actions are *)
-(* merged in the same order. The initial action is *)
-(* always [[DEFAULT]], which can appear only on the *)
-(* left. For most actions, the rightmost action takes *)
-(* precedence, but merging two [[DUMP]] actions performs *)
-(* them both.                                   *)
-(*                                              *)
 (* <boxed values 138>=                          *)
 val _ = op merge: action * action -> action
 (* <look at command-line arguments, then run>=  *)
@@ -8812,21 +8848,11 @@ val actions =
 val unusedActions =  (* reveals answers to homeworks *)   (*OMIT*)
   [ ("-predef",     DUMP (fn () => app println predefs))  (*OMIT*)
   ]                                                       (*OMIT*)
-(* Supporting code for Typed Impcore            *)
-(*                                              *)
-(* [*][*] [*] \invisiblelocaltableofcontents[*] *)
-(*                                              *)
-(* Organizing code chunks \chaptocbacksplitinto an *)
-(* interpreter                                  *)
-(*                                              *)
-(* Like all the interpreters from \crefmlscheme.chap *)
-(* onward, the Typed Impcore interpreter is defined by *)
-(* laying down Noweb chunks in the right order, as *)
-(* discussed in \crefmlschemea.chap. The layout is *)
-(* similar to that of micro-Scheme, but Typed Impcore *)
-(* has two additional chunks which are related to type *)
-(* checking: [[]] and                           *)
-(* [[]].                                        *)
+(* Each possible command-line option is associated with *)
+(* an action. Options [[-q]] and [[-qq]] suppress *)
+(* prompts and echos. Options [[-names]] and    *)
+(* [[-primitives]] dump information found in the initial *)
+(* basis.                                       *)
 (* <boxed values 139>=                          *)
 val _ = op actions : (string * action) list
 (* The [[xdeftable]] is shared with the Impcore parser. *)
@@ -8867,41 +8893,104 @@ fun strip_options a [] = (a, [])
 
 val _ = if hasOption "NORUN" then ()
         else perform (strip_options DEFAULT (CommandLine.arguments ()))
-(* A complete command-line is processed by computing the *)
-(* action associated with the command-line options, then *)
-(* performing that action with the remaining    *)
-(* command-line arguments. Unless option [[NORUN]] is *)
-(* present in the [[BPCOPTIONS]] environment variable. *)
 (* <boxed values 141>=                          *)
 val _ = op strip_options : action -> string list -> action * string list
-(* As an example, if a name is parsed by [[name]] and an *)
-(* expression is parsed by [[exp]], then a name followed *)
-(* by an expression, such as might appear in a [[let]] *)
-(* binding, can be turned into (name, expression) pair *)
-(* by the parser {nwverbatim} pair <> name <*> exp  *)
-(* {nwverbatim} (Parsing the actual micro-Scheme syntax *)
-(* would also require a parser to handle the surrounding *)
-(* parentheses.) As another example, if a micro-Scheme *)
-(* parser has seen a left bracket followed by the *)
-(* keyword [[if]], it can call the parser {nwverbatim} *)
-(* curry3 IFX <> exp <*> exp <*> exp {nwverbatim} which *)
-(* creates the abstract-syntax tree for an [[if]] *)
-(* expression.                                  *)
+(* User-defined, algebraic types \unsecsplit(and pattern *)
+(* matching)                                    *)
 (*                                              *)
-(* The combinator [[<*>]] creates parsers that read *)
-(* things in sequence; but it can't make a choice. *)
-(* If any parser in the sequence fails, the whole *)
-(* sequence fails. A choice, as in ``[[val]] or *)
-(* expression or [[define]] or [[use]],'' is made by a *)
-(* choice operator. The choice operator is written *)
-(* [[<|>]] and pronounced ``or.'' If [[t1]] and [[t2]] *)
-(* are both \atob transformers, then \monoboxt1 <|> t2 *)
-(* is an \atob transformer that first tries [[t1]], then *)
-(* tries [[t2]]. Transformer \monoboxt1 <|> t2 succeeeds *)
-(* if either [[t1]] or [[t2]] succeeds, detects an error *)
-(* if either [[t1]] or [[t2]] detects an error, and *)
-(* fails only if both [[t1]] and [[t2]] fail. To assure *)
-(* that \monoboxt1 <|> t2 has a predictable type no *)
-(* matter which transformer is chosen, both [[t1]] and  *)
-(* [[t2]] have to have the same type.           *)
+(* [*][*] \invisiblelocaltableofcontents[*]     *)
+(*                                              *)
+(* \typesystemuml                               *)
+(*                                              *)
+(* {epigraph}Fred Brooks, The Mythical Man-Month, *)
+(* Chapter 9 Representation is the essence of   *)
+(* programming. ... \penalty-200 Much more often, *)
+(* strategic breakthrough will come from redoing the *)
+(* representation of the data or the tables. This is *)
+(* where the heart of a program lies. Show me your *)
+(* flowcharts and conceal your tables, and I shall *)
+(* continue to be mystified. Show me your tables, and I *)
+(* won't usually need your flowcharts; they'll be *)
+(* obvious. {epigraph}                          *)
+(*                                              *)
+(* \Crefrangeimpcore.chapml.chap don't give us many ways *)
+(* to organize data. S-expressions are great, but you *)
+(* might have noticed that they serve as a kind of *)
+(* high-level assembly language on top of which you have *)
+(* to craft your own data structures. For programming at *)
+(* scale, that's not good enough—programmers need to *)
+(* define proper data structures whose shapes and *)
+(* contents are known. Proper data-definition mechanisms *)
+(* must be able to express these possibilities: *)
+(*                                              *)
+(*  \tightlist                                  *)
+(*   • Data can take multiple forms, like a C [[union]]. *)
+(*   • Data can have multiple parts, like a C  *)
+(*  [[struct]].                                 *)
+(*   • One or more parts may be like the whole, that is, *)
+(*  data can be recursive.                      *)
+(*                                              *)
+(* All these possibilities can be expressed using *)
+(* algebraic data types. Algebraic data types,  *)
+(* supplemented by the base types, function types, and *)
+(* array types shown in previous chapters, suffice to *)
+(* describe and typecheck representations of data at any *)
+(* scale. They are ubiquitous in the ML family and in *)
+(* languages derived from it, including Standard ML, \ *)
+(* ocaml, Haskell, \agda, \gallina, and \idris. *)
+(*                                              *)
+(* Algebraic data types can be added to any language; *)
+(* this chapter adds them to \nml, making the new *)
+(* language uML. To add algebraic data types requires a *)
+(* new species of value, a new expression form for *)
+(* looking at the values, and a new definition form for *)
+(* introducing the types and values.            *)
+(*                                              *)
+(* The new species of value is a constructed value. *)
+(* A constructed value is made by applying some value *)
+(* constructor to zero or more other values. In the *)
+(* syntax, however, zero-argument value constructors *)
+(* aren't applied; a zero-argument value constructor is *)
+(* a value all by itself. For example, [['()]] is a *)
+(* value constructor for lists, and it expects no *)
+(* arguments, so it is a constructed value. And [[cons]] *)
+(* is also a value constructor for lists, but it expects *)
+(* arguments, so to make a constructed value, [[cons]] *)
+(* must be applied to two other values: an element and a *)
+(* list.                                        *)
+(*                                              *)
+(* A constructed value is interrogated, observed, or *)
+(* eliminated scrutinized by a case expression. A case *)
+(* expression provides concise, readable syntax for *)
+(* asking a key question about any datum: how was it *)
+(* formed, and from what parts? A case expression gets *)
+(* the answer by using patterns: a pattern can match a *)
+(* particular value constructor, and when it does, it *)
+(* can name each of the values to which the constructor *)
+(* was applied. For example, the pattern \monobox(cons y *)
+(* ys) matches any cons cell, and when it matches, it *)
+(* binds the name [[y]] to the [[car]] and [[ys]] to the *)
+(* [[cdr]].                                     *)
+(*                                              *)
+(* Case expressions and pattern matching eliminate the *)
+(* clutter associated with functions like [[null?]], *)
+(* [[car]], [[cdr]], [[fst]], and [[snd]]. Instead of *)
+(* using such functions, you lay out the possible forms *)
+(* of the data, and for each form, you name the parts *)
+(* directly. The resulting code is short and clear, and *)
+(* it operates at a higher level of abstraction than *)
+(* Scheme code or C code. With the right syntactic *)
+(* sugar, your code can look a lot like algebraic laws ( *)
+(* \crefadt.sugar).                             *)
+(*                                              *)
+(* A case expression inspects a scrutinee, and it *)
+(* includes a sequence of choices, each of which *)
+(* associates a pattern with a right-hand side. And if *)
+(* the choices don't cover all possible cases,  *)
+(* a compiler can tell you what case you left out (\cref *)
+(* adt.ex.exhaustiveness-check). As an example, a case *)
+(* expression can be used to see if a list is empty; the *)
+(* scrutinee is the formal parameter [[xs]], and there *)
+(* are two choices: one for each form of list. \ *)
+(* addboxumlnull? : (forall ['a] ((list 'a) -> bool)) *)
 

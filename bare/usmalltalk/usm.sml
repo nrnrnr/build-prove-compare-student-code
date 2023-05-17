@@ -1278,7 +1278,7 @@ fun expString e =
          | SEND (_, e, msg, es) => bracketSpace (expString e :: msg :: exps es)
          | BEGIN es => bracketSpace ("begin" :: exps es)
          | PRIMITIVE (p, es) => bracketSpace ("primitive" :: p :: exps es)
-         | BLOCK ([], es) => "[" ^ spaceSep (exps es) ^ "]"
+         | BLOCK ([], es) => "{" ^ spaceSep (exps es) ^ "}"
          | BLOCK (xs, es) =>
              bracketSpace ["block", bracketSpace xs, spaceSep (exps es)]
          | METHOD (xs, [], es) =>

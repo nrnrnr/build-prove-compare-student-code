@@ -22,6 +22,7 @@ int number_of_good_tests(UnitTestlist tests, Valenv globals, Funenv functions) {
 }
 /* imptests.c S301a */
 TestResult test_result(UnitTest t, Valenv globals, Funenv functions) {
+    reset_overflow_check(); /*OMIT*/
     switch (t->alt) {
     case CHECK_EXPECT:
         /* run [[check-expect]] test [[t]], returning [[TestResult]] S301b */

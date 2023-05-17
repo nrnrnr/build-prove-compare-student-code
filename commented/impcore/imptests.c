@@ -66,6 +66,7 @@ int number_of_good_tests(UnitTestlist tests, Valenv globals, Funenv functions) {
  * <imptests.c>=
  */
 TestResult test_result(UnitTest t, Valenv globals, Funenv functions) {
+    reset_overflow_check(); /*OMIT*/
     switch (t->alt) {
     case CHECK_EXPECT:
         /*

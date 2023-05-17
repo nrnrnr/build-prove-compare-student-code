@@ -1809,7 +1809,12 @@ val _ = op outcome    : exp -> value error
 fun processTests (tests, rho) =
       reportTestResults (numberOfGoodTests (tests, rho), length tests)
 and numberOfGoodTests (tests, rho) =
-  foldr (fn (t, n) => if testIsGood (t, rho) then n + 1 else n) 0 tests
+      let val testIsGood = fn args => (resetComputationLimits (); testIsGood
+                                                               args) in (*OMIT*)
+      foldr (fn (t, n) => if testIsGood (t, rho) then n + 1 else n) 0 tests
+      end
+                                                                                
+                                                                        (*OMIT*)
 (* type declarations for consistency checking *)
 val _ = op processTests : unit_test list * basis -> unit
 (* shared read-eval-print loop S237 *)
@@ -1833,7 +1838,7 @@ fun readEvalPrintWith errmsg (xdefs, basis, interactivity) =
               | try (DEFS ds)      = foldl processXDef basis (map DEF ds)
                                                                         (*OMIT*)
             fun caught msg = (errmsg (stripAtLoc msg); basis)
-            val _ = resetComputationLimits ()     (* OMIT *)
+            val () = resetComputationLimits ()     (* OMIT *)
         in  withHandlers try xd caught
         end 
       (* type declarations for consistency checking *)

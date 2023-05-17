@@ -5909,7 +5909,12 @@ fun testIsGood (test, (Delta, Gamma, rho)) =
 fun processTests (tests, rho) =
       reportTestResults (numberOfGoodTests (tests, rho), length tests)
 and numberOfGoodTests (tests, rho) =
-  foldr (fn (t, n) => if testIsGood (t, rho) then n + 1 else n) 0 tests
+      let val testIsGood = fn args => (resetComputationLimits (); testIsGood
+                                                               args) in (*OMIT*)
+      foldr (fn (t, n) => if testIsGood (t, rho) then n + 1 else n) 0 tests
+      end
+                                                                                
+                                                                        (*OMIT*)
 (* \qbreak Function [[processTests]] is shared among all *)
 (* bridge languages. For each test, it calls the *)
 (* language-dependent [[testIsGood]], adds up the number *)
@@ -5937,7 +5942,7 @@ fun readEvalPrintWith errmsg (xdefs, basis, interactivity) =
               | try (DEFS ds)      = foldl processXDef basis (map DEF ds)
                                                                         (*OMIT*)
             fun caught msg = (errmsg (stripAtLoc msg); basis)
-            val _ = resetComputationLimits ()     (* OMIT *)
+            val () = resetComputationLimits ()     (* OMIT *)
         in  withHandlers try xd caught
         end 
       (* The extended-definition forms [[USE]] and [[TEST]] *)

@@ -37,6 +37,7 @@ int number_of_good_tests(UnitTestlist tests, Env rho) {
  * <scheme-tests.c>=
  */
 TestResult test_result(UnitTest t, Env rho) {
+    reset_overflow_check();  /*OMIT*/
     switch (t->alt) {
     case CHECK_EXPECT:
         /*

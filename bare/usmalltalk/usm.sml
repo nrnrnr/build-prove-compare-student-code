@@ -2694,7 +2694,7 @@ fun testIsGood (test, xi) =
                   of OK true => true
                    | OK false =>
                        failtest [cxfailed, "expected ", expString checkx, 
-                                 " to be similar to ",
+                                 " to test as `=` to ",
                                  whatWasExpected (expectx, OK expect),
                                  ", but it's ", printsAs check]
                    | ERROR msg =>
